@@ -1,5 +1,5 @@
 
-export const WORLD_SIZE = 100; 
+export const WORLD_SIZE = 160; 
 export const WATER_LEVEL = 7;
 
 export const BlockType = {

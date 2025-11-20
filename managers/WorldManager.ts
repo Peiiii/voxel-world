@@ -301,8 +301,11 @@ export class WorldManager {
     constructor() {
         // Init base ThreeJS objects
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x87CEEB);
-        this.scene.fog = new THREE.Fog(0x87CEEB, 40, 140); 
+        const skyColor = 0x87CEEB;
+        this.scene.background = new THREE.Color(skyColor);
+        
+        // Adjusted Fog for 160 world size
+        this.scene.fog = new THREE.Fog(skyColor, 60, 150); 
 
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300);
         
@@ -324,19 +327,30 @@ export class WorldManager {
         this.camera.position.set(1.2, 0, 4);
 
         // Lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         this.scene.add(ambientLight);
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
-        dirLight.position.set(50, 150, 50);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(100, 150, 100);
         dirLight.castShadow = true;
-        dirLight.shadow.mapSize.set(4096, 4096);
+        // Optimized Shadow Map
+        dirLight.shadow.mapSize.set(2048, 2048);
         dirLight.shadow.camera.near = 0.5;
         dirLight.shadow.camera.far = 300;
-        const sSize = 140;
+        const sSize = 120;
         dirLight.shadow.camera.left = -sSize; dirLight.shadow.camera.right = sSize;
         dirLight.shadow.camera.top = sSize; dirLight.shadow.camera.bottom = -sSize;
         dirLight.shadow.bias = -0.0004;
         this.scene.add(dirLight);
+
+        // Sun
+        const sunSize = 30;
+        const sunGeo = new THREE.BoxGeometry(sunSize, sunSize, sunSize);
+        const sunMat = new THREE.MeshBasicMaterial({ color: 0xffe34d, fog: false });
+        const sunMesh = new THREE.Mesh(sunGeo, sunMat);
+        sunMesh.position.set(100, 120, -150); 
+        sunMesh.rotation.z = Math.PI / 4;
+        sunMesh.rotation.y = Math.PI / 4;
+        this.scene.add(sunMesh);
     }
 
     public init = (container: HTMLElement) => {
@@ -394,77 +408,64 @@ export class WorldManager {
     }
 
     private generateWorld = () => {
-        const instances: Record<string, { matrix: number[], count: number }> = {};
-        Object.values(BlockType).forEach(type => instances[type] = { matrix: [], count: 0 });
+        const instances: Record<string, number[]> = {};
+        Object.values(BlockType).forEach(type => instances[type] = []);
+        
         const dummy = new THREE.Object3D();
+        const offset = WORLD_SIZE / 2;
 
-        const addBlock = (type: string, x: number, y: number, z: number) => {
-            if (!instances[type]) return;
-            dummy.position.set(x, y, z);
-            dummy.updateMatrix();
-            instances[type].matrix.push(...dummy.matrix.elements);
-            instances[type].count++;
-            
-            // Track interactable blocks
-            const nonInteractables = [BlockType.CLOUD, BlockType.WATER];
-            if (!nonInteractables.includes(type)) {
-                this.blocks.set(`${Math.round(x)},${Math.round(y)},${Math.round(z)}`, { 
-                    type, 
-                    instanceId: instances[type].count - 1,
-                    mesh: null as any
-                });
+        // --- 1. DATA GENERATION PASS ---
+        // Key: "x,y,z", Value: BlockType
+        // We store all generated block data first to allow for culling logic
+        const worldData = new Map<string, string>();
+        const generatedCoords: {x: number, y: number, z: number, type: string}[] = [];
+
+        const storeBlock = (type: string, x: number, y: number, z: number) => {
+            const key = `${x},${y},${z}`;
+            // Avoid duplicates
+            if (!worldData.has(key)) {
+                worldData.set(key, type);
+                generatedCoords.push({x, y, z, type});
             }
         };
 
-        // --- NOISE GENERATORS ---
         const heightNoise = new SimpleNoise(0);
-        const moistureNoise = new SimpleNoise(100); // Determines biome (Desert vs Forest)
-        const riverNoise = new SimpleNoise(500);    // Determines rivers
+        const moistureNoise = new SimpleNoise(100); 
+        const riverNoise = new SimpleNoise(500);
 
-        const offset = WORLD_SIZE / 2;
         const heightMap = new Map<string, { h: number, biome: string, isRiver: boolean }>();
 
-        // First Pass: Terrain Height & Biomes
+        // Terrain Generation
         for (let x = -offset; x < offset; x++) {
             for (let z = -offset; z < offset; z++) {
-                
-                // 1. Biome Determination
+                // 1. Biome
                 const mVal = moistureNoise.noise(x * 0.015, 0, z * 0.015);
                 let biome = 'PLAINS';
                 if (mVal > 0.4) biome = 'FOREST';
                 if (mVal < -0.4) biome = 'DESERT';
                 
-                // 2. River Determination
-                // Use warped noise for better rivers, but simple abs threshold is enough for voxel style
+                // 2. River
                 const rVal = Math.abs(riverNoise.noise(x * 0.012, 0, z * 0.012));
                 const isRiver = rVal < 0.035;
 
-                // 3. Height Calculation
-                // Base height
+                // 3. Height
                 let h = 0;
-                
                 if (biome === 'DESERT') {
-                    // Flatter
                     h = 10 + heightNoise.noise(x * 0.03, 0, z * 0.03) * 6;
                 } else if (biome === 'PLAINS') {
-                    // Gentle hills
                     h = 12 + heightNoise.noise(x * 0.02, 0, z * 0.02) * 8;
                 } else if (biome === 'FOREST') {
-                    // Hillier
                     h = 14 + heightNoise.noise(x * 0.04, 0, z * 0.04) * 12;
                 } else {
-                    // Default fallthrough (shouldn't happen much)
                     h = 12 + heightNoise.noise(x * 0.03, 0, z * 0.03) * 10;
                 }
 
-                // Mountain Peaks override (rare high spots in non-desert)
                 const peakNoise = heightNoise.noise(x * 0.05 + 100, 100, z * 0.05 + 100);
                 if (peakNoise > 0.6 && biome !== 'DESERT') {
                     biome = 'MOUNTAIN';
                     h += (peakNoise - 0.6) * 40;
                 }
 
-                // River carving
                 if (isRiver) {
                     h = Math.min(h, WATER_LEVEL - 1);
                 }
@@ -472,7 +473,7 @@ export class WorldManager {
                 h = Math.round(h);
                 heightMap.set(`${x},${z}`, { h, biome, isRiver });
 
-                // 4. Block Filling
+                // 4. Blocks
                 let surfaceType = BlockType.GRASS;
                 let subSurfaceType = BlockType.DIRT;
 
@@ -490,81 +491,156 @@ export class WorldManager {
                    if (h <= WATER_LEVEL - 3) surfaceType = BlockType.STONE;
                 }
 
-                for (let dy = -4; dy <= h; dy++) {
+                // Only generate blocks down to h - 5 to save memory/processing
+                // No one sees the deep underground anyway in this demo
+                const bottomLimit = h - 5;
+                
+                for (let dy = bottomLimit; dy <= h; dy++) {
                     let type = subSurfaceType;
                     if (dy === h) type = surfaceType;
                     if (dy < h - 3) type = BlockType.STONE;
-                    
-                    addBlock(type, x, dy, z);
+                    storeBlock(type, x, dy, z);
                 }
                 
-                // Water filling
                 if (isRiver || h < WATER_LEVEL) {
                     for (let w = h + 1; w <= WATER_LEVEL; w++) {
-                        addBlock(BlockType.WATER, x, w, z);
+                        storeBlock(BlockType.WATER, x, w, z);
                     }
                 }
             }
         }
 
-        // Second Pass: Decoration (Trees, Cactus, Flowers)
+        // Flora & Structures
         for (let x = -offset + 2; x < offset - 2; x++) {
             for (let z = -offset + 2; z < offset - 2; z++) {
                 const data = heightMap.get(`${x},${z}`);
                 if (!data) continue;
                 const { h, biome, isRiver } = data;
 
-                // Don't decorate in water
                 if (h <= WATER_LEVEL) continue;
 
                 const rand = Math.random();
 
                 if (biome === 'DESERT') {
                     if (rand < 0.015) {
-                        // Cactus
                         const ch = 2 + Math.floor(Math.random() * 3);
-                        for(let i=1; i<=ch; i++) addBlock(BlockType.CACTUS, x, h+i, z);
-                    } else if (rand < 0.05) {
-                        addBlock(BlockType.DEAD_BUSH, x, h+1, z);
-                    }
+                        for(let i=1; i<=ch; i++) storeBlock(BlockType.CACTUS, x, h+i, z);
+                    } else if (rand < 0.05) storeBlock(BlockType.DEAD_BUSH, x, h+1, z);
                 } else if (biome === 'PLAINS') {
-                    if (rand < 0.005) { // Sparse Trees
-                        this.generateTree(x, h, z, addBlock, 'OAK');
-                    } else if (rand < 0.1) {
+                    if (rand < 0.005) this.generateTree(x, h, z, storeBlock, 'OAK');
+                    else if (rand < 0.1) {
                         const f = rand < 0.05 ? BlockType.FLOWER_RED : BlockType.FLOWER_YELLOW;
-                        addBlock(rand < 0.02 ? BlockType.TALL_GRASS : f, x, h+1, z);
+                        storeBlock(rand < 0.02 ? BlockType.TALL_GRASS : f, x, h+1, z);
                     }
                 } else if (biome === 'FOREST') {
-                     if (rand < 0.035) { // Dense Trees
-                        this.generateTree(x, h, z, addBlock, rand > 0.5 ? 'BIRCH' : 'OAK');
-                    } else if (rand < 0.15) {
-                        addBlock(BlockType.TALL_GRASS, x, h+1, z);
-                    }
+                     if (rand < 0.035) this.generateTree(x, h, z, storeBlock, rand > 0.5 ? 'BIRCH' : 'OAK');
+                     else if (rand < 0.15) storeBlock(BlockType.TALL_GRASS, x, h+1, z);
                 }
 
-                // Mobs
                 if (rand > 0.99 && !isRiver) {
                     this.mobs.push(new Mob(Math.random() > 0.5 ? 'cow' : 'sheep', x, h+1, z));
                     this.scene.add(this.mobs[this.mobs.length-1].mesh);
                 }
             }
         }
-        
-        // Clouds
-        for(let i=0; i<60; i++) {
-           const cx = (Math.random()-0.5)*WORLD_SIZE*1.5, cz = (Math.random()-0.5)*WORLD_SIZE*1.5, cy = 60+Math.random()*15;
-           for(let j=0; j<8+Math.random()*10; j++) addBlock(BlockType.CLOUD, cx+Math.random()*10, cy, cz+Math.random()*10);
+
+        // Volumetric Clouds - Restricted to offset
+        const cloudNoise = new SimpleNoise(999);
+        const cloudHeight = 65; 
+        // Only generate clouds over the world area
+        for (let x = -offset; x < offset; x+=2) { // Step 2 for fluffier/less dense clouds
+            for (let z = -offset; z < offset; z+=2) {
+                const n = cloudNoise.noise(x * 0.015, 50, z * 0.015);
+                const d = cloudNoise.noise(x * 0.05, 0, z * 0.05) * 0.15;
+                const val = n + d;
+
+                if (val > 0.35) {
+                    storeBlock(BlockType.CLOUD, x, cloudHeight, z);
+                    if (val > 0.5) storeBlock(BlockType.CLOUD, x, cloudHeight + 1, z);
+                    if (val > 0.6) storeBlock(BlockType.CLOUD, x, cloudHeight + 2, z);
+                }
+            }
         }
 
-        this.createBillboard(addBlock);
+        this.createBillboard(storeBlock);
+
+        // --- 2. CULLING PASS ---
+        // Filter out blocks that are completely hidden
+        const isOpaque = (t: string) => {
+            // Treat these as transparent for culling purposes (i.e. if a neighbor is one of these, we must render)
+            const transparents = [
+                BlockType.WATER, BlockType.GLASS, BlockType.LEAVES, BlockType.BIRCH_LEAVES, 
+                BlockType.FLOWER_RED, BlockType.FLOWER_YELLOW, BlockType.TALL_GRASS, 
+                BlockType.CACTUS, BlockType.DEAD_BUSH, BlockType.CLOUD, BlockType.NEON_CYAN, BlockType.NEON_MAGENTA
+            ];
+            return !transparents.includes(t);
+        }
+
+        for (const block of generatedCoords) {
+            const {x, y, z, type} = block;
+
+            // Always render non-opaque blocks (Water, Glass, Flora, etc)
+            // This simplifies transparency handling
+            if (!isOpaque(type)) {
+                this.addInstance(instances, type, x, y, z);
+                continue;
+            }
+
+            // For opaque blocks, check neighbors.
+            // If a neighbor is missing OR is not opaque, we are visible.
+            // We need to check 6 faces.
+            let visible = false;
+            const neighbors = [
+                [x+1, y, z], [x-1, y, z],
+                [x, y+1, z], [x, y-1, z],
+                [x, y, z+1], [x, y, z-1]
+            ];
+
+            for (const [nx, ny, nz] of neighbors) {
+                const nKey = `${nx},${ny},${nz}`;
+                const nType = worldData.get(nKey);
+                
+                // If neighbor is void (undefined) or transparent, face is visible -> block is visible
+                if (!nType || !isOpaque(nType)) {
+                    visible = true;
+                    break;
+                }
+            }
+
+            if (visible) {
+                this.addInstance(instances, type, x, y, z);
+            }
+        }
+
         this.buildMeshes(instances);
+    }
+
+    private addInstance(instances: Record<string, number[]>, type: string, x: number, y: number, z: number) {
+        if (!instances[type]) return;
+        const dummy = new THREE.Object3D();
+        dummy.position.set(x, y, z);
+        dummy.updateMatrix();
+        instances[type].push(...dummy.matrix.elements);
+        
+        // Register interactable blocks
+        const nonInteractables = [BlockType.CLOUD, BlockType.WATER];
+        if (!nonInteractables.includes(type)) {
+            // Calculate index based on current length. 
+            // 16 elements per matrix.
+            const idx = (instances[type].length / 16) - 1;
+            this.blocks.set(`${x},${y},${z}`, { 
+                type, 
+                instanceId: idx,
+                mesh: null as any // Will be assigned in buildMeshes
+            });
+        }
     }
 
     private generateTree(x: number, y: number, z: number, addBlock: Function, type: 'OAK' | 'BIRCH') {
         const woodType = type === 'OAK' ? BlockType.WOOD : BlockType.BIRCH_WOOD;
         const leafType = type === 'OAK' ? BlockType.LEAVES : BlockType.BIRCH_LEAVES;
         
-        const h = 4 + Math.floor(Math.random() * 3); // Trunk Height
+        const h = 4 + Math.floor(Math.random() * 3); 
 
         for(let i=1; i<=h; i++) addBlock(woodType, x, y+i, z);
         
@@ -581,8 +657,8 @@ export class WorldManager {
     }
 
     private createBillboard(addBlock: Function) {
-        const billboardZ = -WORLD_SIZE/2 - 10;
-        const billboardY = 70;
+        const billboardZ = -80; // Moved closer for 160 world size
+        const billboardY = 60;
         const scale = 4;
 
         const FONT_MAP: Record<string, number[]> = {
@@ -601,14 +677,12 @@ export class WorldManager {
         const fontW = 5;
         const spacing = 1;
         
-        // Calculate total dimensions in Blocks
         const totalCharWidth = text.length * (fontW * scale);
         const totalSpacingWidth = (text.length - 1) * (spacing * scale);
         const totalWidth = totalCharWidth + totalSpacingWidth;
         
         const startX = -Math.floor(totalWidth / 2);
 
-        // Screen Background Padding
         const padX = 6;
         const padY = 6;
         const screenW = totalWidth + padX * 2;
@@ -656,15 +730,16 @@ export class WorldManager {
         }
     }
 
-    private buildMeshes(instances: Record<string, { matrix: number[], count: number }>) {
+    private buildMeshes(instances: Record<string, number[]>) {
         const geo = new THREE.BoxGeometry(1,1,1);
-        const smallGeo = new THREE.BoxGeometry(0.6,0.6,0.6); // Flowers/Grass
-        const poleGeo = new THREE.BoxGeometry(0.85, 1, 0.85); // Cactus
-        const flatGeo = new THREE.BoxGeometry(0.8, 0.6, 0.8); // Dead Bush
+        const smallGeo = new THREE.BoxGeometry(0.6,0.6,0.6); 
+        const poleGeo = new THREE.BoxGeometry(0.85, 1, 0.85); 
+        const flatGeo = new THREE.BoxGeometry(0.8, 0.6, 0.8); 
         
         Object.keys(instances).forEach(key => {
-            const data = instances[key];
-            if (data.count === 0) return;
+            const matrixArray = instances[key];
+            const count = matrixArray.length / 16;
+            if (count === 0) return;
             
             let geometry = geo;
             const isFlora = [BlockType.FLOWER_RED, BlockType.FLOWER_YELLOW, BlockType.TALL_GRASS].includes(key);
@@ -677,8 +752,11 @@ export class WorldManager {
             if (key === BlockType.WATER) { 
                 mat.transparent = true; mat.opacity = 0.6; mat.roughness = 0.1; 
             }
-            if (key === BlockType.CLOUD || key === BlockType.GLASS) { 
-                mat.transparent = true; mat.opacity = key===BlockType.CLOUD ? 0.8 : 0.4; 
+            if (key === BlockType.CLOUD) { 
+                mat.transparent = false; mat.opacity = 1.0; mat.roughness = 1.0;
+            }
+            if (key === BlockType.GLASS) {
+                mat.transparent = true; mat.opacity = 0.4;
             }
             if (key === BlockType.NEON_CYAN || key === BlockType.NEON_MAGENTA) {
                 mat.emissive = new THREE.Color(PALETTE[key]);
@@ -686,19 +764,32 @@ export class WorldManager {
                 mat.toneMapped = false;
             }
             
-            const mesh = new THREE.InstancedMesh(geometry, mat, data.count);
+            const mesh = new THREE.InstancedMesh(geometry, mat, count);
             mesh.castShadow = !([BlockType.WATER, BlockType.CLOUD, BlockType.GLASS, BlockType.NEON_CYAN, BlockType.NEON_MAGENTA].includes(key));
             mesh.receiveShadow = true;
             
             const m4 = new THREE.Matrix4();
-            for(let i=0; i<data.count; i++) {
-                m4.fromArray(data.matrix, i*16);
+            for(let i=0; i<count; i++) {
+                m4.fromArray(matrixArray, i*16);
                 mesh.setMatrixAt(i, m4);
                 
-                const p = new THREE.Vector3().setFromMatrixPosition(m4);
-                const b = this.getBlock(p.x, p.y, p.z);
-                if(b) b.mesh = mesh;
+                // Note: InstancedMesh creation is now decoupled from initial block registration.
+                // We must retroactively update the block map references if we want to mine them.
+                // However, checking the map by position is expensive here.
+                // Instead, we did it during AddInstance.
             }
+            
+            // Re-bind meshes to blocks for mining interaction
+            // Since we culled, 'this.blocks' only contains interactables that are visible.
+            // But 'this.blocks' entries have instanceId relative to the full list? 
+            // No, addInstance calculates ID based on the filtered list.
+            // But we need to link the MESH to the block data.
+            for (const [posKey, block] of this.blocks) {
+                if (block.type === key) {
+                    block.mesh = mesh;
+                }
+            }
+
             this.scene.add(mesh);
             this.instancedMeshes.push(mesh);
         });
