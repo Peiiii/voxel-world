@@ -139,7 +139,7 @@
         padding: 5px 10px;
         border-radius: 4px;
         pointer-events: none;
-        display: none;
+        z-index: 20;
       }
     </style>
   <script type="importmap">
@@ -149,7 +149,8 @@
     "three": "https://aistudiocdn.com/three@^0.181.2",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "react": "https://aistudiocdn.com/react@^19.2.0"
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "zustand": "https://aistudiocdn.com/zustand@^5.0.8"
   }
 }
 </script>
@@ -157,27 +158,11 @@
   <body>
     <div id="root"></div>
     
-    <div id="ui-layer">
-      <div id="info-panel">
-        <h1>Voxel Engine</h1>
-        <div class="key-row"><span class="key">WASD</span> Move</div>
-        <div class="key-row"><span class="key">SPACE</span> Jump</div>
-        <div class="key-row"><span class="key">F</span> Toggle Fly</div>
-        <div class="key-row"><span class="key">L-Click (Hold)</span> Mine</div>
-      </div>
-
-      <div id="center-hud">
-        <div id="crosshair"></div>
-        <div id="mining-ring"></div>
-      </div>
-
-      <div id="start-screen">
-        <h1>VOXEL WORLD</h1>
-        <button id="start-btn" class="btn">ENTER WORLD</button>
-      </div>
-    </div>
-    
     <div id="loading">Generating World...</div>
+
+    <!-- UI Layer is handled by React Portals or Absolute Positioning within root, 
+         but we keep the legacy structure clean. React will inject into root. -->
+
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>
