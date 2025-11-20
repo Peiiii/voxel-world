@@ -13,11 +13,13 @@ export const UIOverlay: React.FC = () => {
 
   const joystickRef = useRef<HTMLDivElement>(null);
   const [joystickVec, setJoystickVec] = useState({ x: 0, y: 0 });
+  const [showHelp, setShowHelp] = useState(false);
 
   // Desktop Key Listener
   useEffect(() => {
       const onKey = (e: KeyboardEvent) => {
           if (e.code === 'KeyF') presenter.toggleFly();
+          if (e.code === 'KeyH') setShowHelp(prev => !prev);
       }
       window.addEventListener('keydown', onKey);
       return () => window.removeEventListener('keydown', onKey);
@@ -55,14 +57,35 @@ export const UIOverlay: React.FC = () => {
   return (
     <div id="ui-layer" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', touchAction: 'none' }}>
       
-      {/* Desktop Info */}
+      {/* Desktop Info - Collapsible */}
       {!isMobile && (
-        <div id="info-panel" style={{ opacity: isLocked ? 0.3 : 1 }}>
-            <h1>Voxel Engine (MVP)</h1>
-            <div className="key-row"><span className="key">WASD</span> Move</div>
-            <div className="key-row"><span className="key">SPACE</span> Jump</div>
-            <div className="key-row"><span className="key">F</span> Toggle Fly</div>
-            <div className="key-row"><span className="key">L-Click</span> Mine</div>
+        <div 
+            id="info-panel" 
+            style={{ 
+                opacity: isLocked ? 0.3 : 1, 
+                pointerEvents: 'auto',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease'
+            }}
+            onClick={() => setShowHelp(!showHelp)}
+        >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: '120px' }}>
+                <h1 style={{ margin: 0, fontSize: '1.1rem' }}>Controls <span style={{fontSize: '0.8rem', opacity: 0.7}}>[H]</span></h1>
+                <span style={{ transform: showHelp ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s', fontSize: '0.8rem' }}>▼</span>
+            </div>
+            
+            <div style={{ 
+                maxHeight: showHelp ? '300px' : '0', 
+                opacity: showHelp ? 1 : 0,
+                overflow: 'hidden',
+                transition: 'all 0.3s ease',
+                marginTop: showHelp ? '10px' : '0'
+            }}>
+                <div className="key-row"><span className="key">WASD</span> Move</div>
+                <div className="key-row"><span className="key">SPACE</span> Jump</div>
+                <div className="key-row"><span className="key">F</span> Toggle Fly</div>
+                <div className="key-row"><span className="key">L-Click</span> Mine</div>
+            </div>
         </div>
       )}
 
