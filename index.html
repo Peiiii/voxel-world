@@ -37,13 +37,24 @@
         align-items: center;
       }
       #crosshair {
-        width: 4px;
-        height: 4px;
-        background: white;
-        border-radius: 50%;
-        box-shadow: 0 0 2px rgba(0,0,0,0.5);
+        width: 20px;
+        height: 20px;
+        position: relative;
         z-index: 2;
       }
+      #crosshair::before, #crosshair::after {
+        content: '';
+        position: absolute;
+        background: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 0 2px 0px rgba(0,0,0,0.8);
+      }
+      #crosshair::before {
+        top: 9px; left: 0; width: 20px; height: 2px;
+      }
+      #crosshair::after {
+        top: 0; left: 9px; width: 2px; height: 20px;
+      }
+
       #mining-ring {
         position: absolute;
         width: 40px;
@@ -51,8 +62,10 @@
         border: 3px solid rgba(255, 255, 255, 0.8);
         border-radius: 50%;
         transform: scale(0);
-        transition: transform 0.1s;
+        transition: transform 0.05s linear; /* Faster transition for responsiveness */
         box-sizing: border-box;
+        z-index: 1;
+        box-shadow: 0 0 4px rgba(0,0,0,0.5);
       }
 
       /* Controls / Info Panel */

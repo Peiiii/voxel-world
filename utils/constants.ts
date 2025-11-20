@@ -37,15 +37,17 @@ export const PALETTE = {
 };
 
 export const HARDNESS: Record<string, number> = {
-    [BlockType.GRASS]: 150, 
-    [BlockType.DIRT]: 150,
-    [BlockType.STONE]: 400,
-    [BlockType.SAND]: 100,
-    [BlockType.SNOW]: 100,
-    [BlockType.WOOD]: 300,
-    [BlockType.LEAVES]: 50,
-    [BlockType.PLANKS]: 300,
-    [BlockType.GLASS]: 50
+    [BlockType.GRASS]: 600, 
+    [BlockType.DIRT]: 600,
+    [BlockType.STONE]: 2000,
+    [BlockType.SAND]: 500,
+    [BlockType.SNOW]: 400,
+    [BlockType.WOOD]: 1500,
+    [BlockType.LEAVES]: 250,
+    [BlockType.PLANKS]: 1500,
+    [BlockType.GLASS]: 250,
+    [BlockType.WATER]: Infinity,
+    [BlockType.CLOUD]: Infinity
 };
 
 // --- PERLIN NOISE ---

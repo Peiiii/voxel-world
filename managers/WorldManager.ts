@@ -4,6 +4,21 @@ import { BlockType, PALETTE, SimpleNoise, WORLD_SIZE, WATER_LEVEL } from '../uti
 
 // --- SUB-CLASSES (Internal to World Manager for now to keep simplicity) ---
 
+class SelectionBox {
+    public mesh: THREE.LineSegments;
+    constructor(scene: THREE.Scene) {
+        const geometry = new THREE.BoxGeometry(1.005, 1.005, 1.005);
+        const edges = new THREE.EdgesGeometry(geometry);
+        this.mesh = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.4, transparent: true }));
+        this.mesh.visible = false;
+        scene.add(this.mesh);
+    }
+    update(x: number, y: number, z: number, visible: boolean) {
+        this.mesh.visible = visible;
+        if (visible) this.mesh.position.set(x, y, z);
+    }
+}
+
 class Mob {
     public mesh: THREE.Group;
     private body: THREE.Mesh;
@@ -112,6 +127,8 @@ class PlayerActor {
     private legL: THREE.Mesh;
     private legR: THREE.Mesh;
     private walkTime = 0;
+    private isMining = false;
+    private mineAnimTime = 0;
 
     constructor() {
         this.mesh = new THREE.Group();
@@ -130,6 +147,8 @@ class PlayerActor {
         const armGeo = new THREE.BoxGeometry(0.2, 0.7, 0.2);
         this.armL = new THREE.Mesh(armGeo, skinMat); this.armL.position.set(-0.4, 1.05, 0);
         this.armR = new THREE.Mesh(armGeo, skinMat); this.armR.position.set(0.4, 1.05, 0);
+        this.armR.geometry.translate(0, -0.25, 0); // Shift pivot for better swing
+        this.armR.position.y += 0.25;
         this.mesh.add(this.armL, this.armR);
 
         const legGeo = new THREE.BoxGeometry(0.25, 0.7, 0.25);
@@ -140,19 +159,38 @@ class PlayerActor {
         this.mesh.traverse(o => { o.castShadow = true; o.receiveShadow = true; });
     }
 
+    setMining(mining: boolean) {
+        this.isMining = mining;
+    }
+
     update(dt: number, speed: number, isFlying: boolean) {
+        // Walking Animation
         if (speed > 0.5 && !isFlying) {
             this.walkTime += dt * speed * 1.5;
             this.legL.rotation.x = Math.sin(this.walkTime) * 0.8;
             this.legR.rotation.x = Math.sin(this.walkTime + Math.PI) * 0.8;
             this.armL.rotation.x = Math.sin(this.walkTime + Math.PI) * 0.8;
-            this.armR.rotation.x = Math.sin(this.walkTime) * 0.8;
         } else {
             const lerp = 10 * dt;
             this.legL.rotation.x = THREE.MathUtils.lerp(this.legL.rotation.x, 0, lerp);
             this.legR.rotation.x = THREE.MathUtils.lerp(this.legR.rotation.x, 0, lerp);
             this.armL.rotation.x = THREE.MathUtils.lerp(this.armL.rotation.x, 0, lerp);
-            this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, 0, lerp);
+        }
+
+        // Mining / Idle Arm Animation
+        if (this.isMining) {
+            this.mineAnimTime += dt * 15;
+            this.armR.rotation.x = -Math.abs(Math.sin(this.mineAnimTime)) * 2 + 0.5;
+            this.armR.rotation.z = 0;
+        } else {
+            const lerp = 10 * dt;
+             if (speed > 0.5 && !isFlying) {
+                 this.armR.rotation.x = Math.sin(this.walkTime) * 0.8;
+             } else {
+                 this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, 0, lerp);
+             }
+            this.armR.rotation.z = THREE.MathUtils.lerp(this.armR.rotation.z, 0, lerp);
+            this.mineAnimTime = 0;
         }
     }
     
@@ -162,13 +200,19 @@ class PlayerActor {
 
 class ParticleSystem {
     private mesh: THREE.InstancedMesh;
-    private count = 1000;
-    private particles: { position: THREE.Vector3, velocity: THREE.Vector3, life: number, active: boolean }[] = [];
+    private count = 2000;
+    private particles: { 
+        position: THREE.Vector3, 
+        velocity: THREE.Vector3, 
+        rotVel: THREE.Vector3, 
+        life: number, 
+        active: boolean 
+    }[] = [];
     private dummy = new THREE.Object3D();
     private activeIndex = 0;
 
     constructor(scene: THREE.Scene) {
-        const geometry = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+        const geometry = new THREE.BoxGeometry(0.12, 0.12, 0.12);
         const material = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true });
         this.mesh = new THREE.InstancedMesh(geometry, material, this.count);
         this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -181,6 +225,7 @@ class ParticleSystem {
             this.particles.push({
                 position: new THREE.Vector3(),
                 velocity: new THREE.Vector3(),
+                rotVel: new THREE.Vector3(),
                 life: 0,
                 active: false
             });
@@ -190,17 +235,18 @@ class ParticleSystem {
         }
     }
 
-    emit(pos: THREE.Vector3, colorHex: number, amount: number = 8) {
+    emit(pos: THREE.Vector3, colorHex: number, amount: number = 20) {
         const color = new THREE.Color(colorHex);
         for(let i=0; i<amount; i++) {
             this.activeIndex = (this.activeIndex + 1) % this.count;
             const p = this.particles[this.activeIndex];
-            p.active = true; p.life = 1.0; 
+            p.active = true; p.life = 0.8 + Math.random() * 0.4; 
             p.position.copy(pos);
-            p.position.x += (Math.random() - 0.5) * 0.8;
-            p.position.y += (Math.random() - 0.5) * 0.8;
-            p.position.z += (Math.random() - 0.5) * 0.8;
-            p.velocity.set((Math.random() - 0.5) * 5, (Math.random() * 5) + 2, (Math.random() - 0.5) * 5);
+            p.position.x += (Math.random() - 0.5) * 0.9;
+            p.position.y += (Math.random() - 0.5) * 0.9;
+            p.position.z += (Math.random() - 0.5) * 0.9;
+            p.velocity.set((Math.random() - 0.5) * 6, (Math.random() * 4) + 2, (Math.random() - 0.5) * 6);
+            p.rotVel.set((Math.random()-0.5)*10, (Math.random()-0.5)*10, (Math.random()-0.5)*10);
             this.mesh.setColorAt(this.activeIndex, color);
         }
         if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
@@ -212,7 +258,7 @@ class ParticleSystem {
             const p = this.particles[i];
             if (p.active) {
                 p.life -= dt;
-                p.velocity.y -= 15 * dt;
+                p.velocity.y -= 20 * dt;
                 p.position.addScaledVector(p.velocity, dt);
 
                 if (p.life <= 0) {
@@ -220,8 +266,8 @@ class ParticleSystem {
                     this.dummy.position.set(0, -1000, 0);
                 } else {
                     this.dummy.position.copy(p.position);
-                    this.dummy.rotation.x += p.velocity.z * dt;
-                    this.dummy.rotation.y += p.velocity.x * dt;
+                    this.dummy.rotation.x += p.rotVel.x * dt;
+                    this.dummy.rotation.y += p.rotVel.y * dt;
                     const scale = p.life; 
                     this.dummy.scale.set(scale, scale, scale);
                 }
@@ -246,8 +292,11 @@ export class WorldManager {
     public mobs: Mob[] = [];
     public playerActor: PlayerActor | null = null;
     public particles: ParticleSystem | null = null;
+    public selectionBox: SelectionBox | null = null;
     
     public instancedMeshes: THREE.InstancedMesh[] = [];
+
+    private cameraRaycaster = new THREE.Raycaster();
 
     constructor() {
         // Init base ThreeJS objects
@@ -264,12 +313,18 @@ export class WorldManager {
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
         // Camera Rig
+        // Yaw Group handles Horizontal Rotation and Physics Position
         this.cameraYawGroup = new THREE.Group();
-        this.cameraPitchGroup = new THREE.Group();
         this.scene.add(this.cameraYawGroup);
+
+        // Pitch Group handles Vertical Rotation and Pivot Point (Eyes)
+        this.cameraPitchGroup = new THREE.Group();
+        this.cameraPitchGroup.position.y = 1.6; // Eye Height
         this.cameraYawGroup.add(this.cameraPitchGroup);
+        
+        // Camera Object handles Distance (Zoom)
         this.cameraPitchGroup.add(this.camera);
-        this.camera.position.set(0, 0.5, 4); 
+        this.camera.position.set(1.2, 0, 4); // Initial Right Shoulder Offset
 
         // Lighting
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
@@ -294,6 +349,7 @@ export class WorldManager {
         this.particles = new ParticleSystem(this.scene);
         this.playerActor = new PlayerActor();
         this.scene.add(this.playerActor.mesh);
+        this.selectionBox = new SelectionBox(this.scene);
 
         window.addEventListener('resize', this.onResize);
     }
@@ -330,6 +386,14 @@ export class WorldManager {
             return block.type;
         }
         return null;
+    }
+
+    public setSelection = (x: number, y: number, z: number, visible: boolean) => {
+        this.selectionBox?.update(x, y, z, visible);
+    }
+
+    public setPlayerMining = (mining: boolean) => {
+        this.playerActor?.setMining(mining);
     }
 
     private generateWorld = () => {
@@ -461,16 +525,44 @@ export class WorldManager {
     }
 
     public render = (dt: number, cameraYaw: number, cameraPitch: number, physPos: THREE.Vector3, physVel: THREE.Vector3, isFlying: boolean) => {
-        // Lerp visual position
+        // Lerp visual position (Physics Y is at feet)
         this.cameraYawGroup.position.x = physPos.x;
         this.cameraYawGroup.position.z = physPos.z;
         this.cameraYawGroup.position.y = THREE.MathUtils.lerp(this.cameraYawGroup.position.y, physPos.y, dt * 15);
         
-        // Apply rotation
+        // Apply rotation to Groups
         this.cameraYawGroup.rotation.y = cameraYaw;
         this.cameraPitchGroup.rotation.x = cameraPitch;
 
-        // Update Player Mesh
+        // --- SMART CAMERA COLLISION LOGIC ---
+        
+        // 1. Calculate the "Ideal" local position of the camera (Right Shoulder)
+        // Ideally it's at (1.2, 0, 4) relative to the Head Pivot (PitchGroup)
+        const idealLocal = new THREE.Vector3(1.2, 0.0, 4.0); 
+
+        // 2. Calculate World Coordinates
+        const pivotWorld = new THREE.Vector3(0,0,0).applyMatrix4(this.cameraPitchGroup.matrixWorld); // Head position
+        const idealWorld = idealLocal.clone().applyMatrix4(this.cameraPitchGroup.matrixWorld); // Target Camera position
+
+        // 3. Raycast from Pivot (Head) to Ideal Camera Pos
+        const dir = new THREE.Vector3().subVectors(idealWorld, pivotWorld);
+        const dist = dir.length();
+        dir.normalize();
+
+        this.cameraRaycaster.set(pivotWorld, dir);
+        this.cameraRaycaster.far = dist;
+        const intersects = this.cameraRaycaster.intersectObjects(this.instancedMeshes);
+
+        // 4. Determine actual distance based on collision
+        // If hit, move camera to hit point (minus buffer)
+        const actualDist = (intersects.length > 0) ? Math.max(0.2, intersects[0].distance - 0.2) : dist;
+        const ratio = actualDist / dist;
+
+        // 5. Apply to Camera (Local position scales towards 0,0,0 based on collision ratio)
+        this.camera.position.copy(idealLocal).multiplyScalar(ratio);
+
+
+        // Update Player Mesh (Sync with Camera Rig)
         if (this.playerActor) {
             this.playerActor.setPosition(this.cameraYawGroup.position);
             this.playerActor.setRotation(cameraYaw);

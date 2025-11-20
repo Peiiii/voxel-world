@@ -62,7 +62,7 @@ export class GamePresenter {
         document.addEventListener('mousedown', this.onMouseDown);
         document.addEventListener('mouseup', this.onMouseUp);
         document.addEventListener('pointerlockchange', this.onPointerLockChange);
-        document.addEventListener('pointerlockerror', (e) => console.error("Pointer Lock Error", e));
+        document.addEventListener('pointerlockerror', (e) => console.warn("Pointer Lock Error (handled)", e));
         
         // Touch controls for camera look
         document.addEventListener('touchmove', this.onTouchMove, { passive: false });
@@ -76,11 +76,20 @@ export class GamePresenter {
 
     public requestPointerLock = () => {
         if (this.isMobile) {
-            // Mobile: Bypass pointer lock API and just start the game
             useGameStore.getState().setLocked(true);
         } else {
-            // Desktop: Request actual lock
-            document.body.requestPointerLock();
+            if (document.pointerLockElement === document.body) return;
+            
+            try {
+                const promise = document.body.requestPointerLock();
+                // @ts-ignore - Some browsers return a promise that rejects if the user exits fast
+                if (promise && typeof promise.catch === 'function') {
+                    // @ts-ignore
+                    promise.catch(e => { /* Ignore user cancellation/fast exit */ });
+                }
+            } catch (e) {
+                console.warn("Pointer lock failed:", e);
+            }
         }
     }
 
@@ -171,6 +180,8 @@ export class GamePresenter {
         this.physics.step(dt, this.cameraYaw, this.input.keys);
 
         if (useGameStore.getState().isLocked) {
+            // Update Raycaster - Use the Center of the screen which corresponds to the Camera's forward vector
+            // Since our camera is offset, we still raycast from the camera's position forward
             this.raycaster.setFromCamera(new THREE.Vector2(0,0), this.world.camera);
             this.raycaster.far = 6;
             const intersects = this.raycaster.intersectObjects(this.world.instancedMeshes);
@@ -182,32 +193,44 @@ export class GamePresenter {
                 const block = this.world.getBlock(p.x, p.y, p.z);
                 if (block) {
                     found = true;
-                    if (!this.targetBlock || this.targetBlock.x !== Math.round(p.x) || this.targetBlock.y !== Math.round(p.y) || this.targetBlock.z !== Math.round(p.z)) {
-                        this.targetBlock = { x: Math.round(p.x), y: Math.round(p.y), z: Math.round(p.z), type: block.type };
+                    const bx = Math.round(p.x);
+                    const by = Math.round(p.y);
+                    const bz = Math.round(p.z);
+                    
+                    this.world.setSelection(bx, by, bz, true);
+
+                    if (!this.targetBlock || this.targetBlock.x !== bx || this.targetBlock.y !== by || this.targetBlock.z !== bz) {
+                        this.targetBlock = { x: bx, y: by, z: bz, type: block.type };
                         this.mineStartTime = time;
+                        setMiningProgress(0);
                     }
+                    
                     if (this.isMining) {
-                        const hardness = HARDNESS[block.type] || 200;
+                        const hardness = HARDNESS[block.type] || 1000;
                         const progress = Math.min((time - this.mineStartTime) / hardness, 1);
                         setMiningProgress(progress);
                         
                         if (progress >= 1) {
                             const removed = this.world.removeBlock(this.targetBlock.x, this.targetBlock.y, this.targetBlock.z);
                             if (removed && this.world.particles) {
-                                this.world.particles.emit(new THREE.Vector3(this.targetBlock.x, this.targetBlock.y, this.targetBlock.z), PALETTE[removed], 12);
+                                this.world.particles.emit(new THREE.Vector3(this.targetBlock.x, this.targetBlock.y, this.targetBlock.z), PALETTE[removed], 25);
                             }
                             this.isMining = false;
                             setMiningProgress(0);
                         }
                     } else {
                         setMiningProgress(0);
+                        this.mineStartTime = time; // Reset start time if not mining but looking
                     }
                 }
             }
             if (!found) {
                 this.targetBlock = null;
                 setMiningProgress(0);
+                this.world.setSelection(0, 0, 0, false);
             }
+            
+            this.world.setPlayerMining(this.isMining);
         }
 
         this.world.render(dt, this.cameraYaw, this.cameraPitch, this.physics.position, this.physics.velocity, this.physics.flying);
