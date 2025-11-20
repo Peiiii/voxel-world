@@ -6,6 +6,8 @@ import { usePresenter } from '../context/GameContext';
 export const UIOverlay: React.FC = () => {
   const isLocked = useGameStore(state => state.isLocked);
   const miningProgress = useGameStore(state => state.miningProgress);
+  const gameStarted = useGameStore(state => state.gameStarted);
+  const setGameStarted = useGameStore(state => state.setGameStarted);
   const presenter = usePresenter();
   const isMobile = presenter.isMobile; // Read once from presenter
 
@@ -22,6 +24,7 @@ export const UIOverlay: React.FC = () => {
   }, [presenter]);
 
   const handleEnterWorld = () => {
+      setGameStarted(true);
       presenter.requestPointerLock();
   };
 
@@ -112,7 +115,7 @@ export const UIOverlay: React.FC = () => {
       )}
 
       {/* Start Screen */}
-      {!isLocked && (
+      {!gameStarted && (
         <div id="start-screen">
           <h1>VOXEL WORLD</h1>
           <button id="start-btn" className="btn" onClick={handleEnterWorld}>

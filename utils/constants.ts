@@ -16,7 +16,11 @@ export const BlockType = {
   GLASS: 'glass',
   FLOWER_RED: 'flower_red',
   FLOWER_YELLOW: 'flower_yellow',
-  TALL_GRASS: 'tall_grass'
+  TALL_GRASS: 'tall_grass',
+  OBSIDIAN: 'obsidian',
+  DARK_MATTER: 'dark_matter',
+  NEON_CYAN: 'neon_cyan',
+  NEON_MAGENTA: 'neon_magenta'
 };
 
 export const PALETTE = {
@@ -33,7 +37,11 @@ export const PALETTE = {
   [BlockType.GLASS]: 0xAED9E0,
   [BlockType.FLOWER_RED]: 0xFF0000,
   [BlockType.FLOWER_YELLOW]: 0xFFFF00,
-  [BlockType.TALL_GRASS]: 0x4A8F28
+  [BlockType.TALL_GRASS]: 0x4A8F28,
+  [BlockType.OBSIDIAN]: 0x1A1A1A,
+  [BlockType.DARK_MATTER]: 0x050505,
+  [BlockType.NEON_CYAN]: 0x00FFFF,
+  [BlockType.NEON_MAGENTA]: 0xFF00CC
 };
 
 export const HARDNESS: Record<string, number> = {
@@ -47,7 +55,11 @@ export const HARDNESS: Record<string, number> = {
     [BlockType.PLANKS]: 1500,
     [BlockType.GLASS]: 250,
     [BlockType.WATER]: Infinity,
-    [BlockType.CLOUD]: Infinity
+    [BlockType.CLOUD]: Infinity,
+    [BlockType.OBSIDIAN]: Infinity,
+    [BlockType.DARK_MATTER]: Infinity,
+    [BlockType.NEON_CYAN]: 2000,
+    [BlockType.NEON_MAGENTA]: 2000
 };
 
 // --- PERLIN NOISE ---

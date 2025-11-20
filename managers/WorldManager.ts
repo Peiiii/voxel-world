@@ -302,9 +302,9 @@ export class WorldManager {
         // Init base ThreeJS objects
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87CEEB);
-        this.scene.fog = new THREE.Fog(0x87CEEB, 30, 120);
+        this.scene.fog = new THREE.Fog(0x87CEEB, 30, 180); // Increased fog distance for the giant screen
 
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300); // Increased far plane
         
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -335,7 +335,7 @@ export class WorldManager {
         dirLight.shadow.mapSize.set(4096, 4096);
         dirLight.shadow.camera.near = 0.5;
         dirLight.shadow.camera.far = 300;
-        const sSize = 80;
+        const sSize = 120; // Increased shadow map coverage
         dirLight.shadow.camera.left = -sSize; dirLight.shadow.camera.right = sSize;
         dirLight.shadow.camera.top = sSize; dirLight.shadow.camera.bottom = -sSize;
         dirLight.shadow.bias = -0.0004;
@@ -408,7 +408,14 @@ export class WorldManager {
             instances[type].matrix.push(...dummy.matrix.elements);
             instances[type].count++;
             
-            if ([BlockType.GRASS, BlockType.DIRT, BlockType.STONE, BlockType.SAND, BlockType.WOOD, BlockType.PLANKS].includes(type)) {
+            // Track blocks for interaction
+            const interactables = [
+                BlockType.GRASS, BlockType.DIRT, BlockType.STONE, BlockType.SAND, 
+                BlockType.WOOD, BlockType.PLANKS, BlockType.OBSIDIAN, 
+                BlockType.DARK_MATTER, BlockType.NEON_CYAN, BlockType.NEON_MAGENTA
+            ];
+            
+            if (interactables.includes(type)) {
                 this.blocks.set(`${Math.round(x)},${Math.round(y)},${Math.round(z)}`, { 
                     type, 
                     instanceId: instances[type].count - 1,
@@ -493,6 +500,93 @@ export class WorldManager {
            for(let j=0; j<8+Math.random()*10; j++) addBlock(BlockType.CLOUD, cx+Math.random()*10, cy, cz+Math.random()*10);
         }
 
+        // --- MASSIVE VOXEL WORLD BILLBOARD ---
+        const billboardZ = -offset - 20; // Push it back further so it dominates the horizon
+        const billboardY = 70; // Very high up
+        const scale = 4; // 4x4 blocks per pixel! MASSIVE.
+
+        const FONT_MAP: Record<string, number[]> = {
+            'V': [17, 17, 17, 17, 10, 10, 4],
+            'O': [14, 17, 17, 17, 17, 17, 14],
+            'X': [17, 17, 10, 4, 10, 17, 17],
+            'E': [31, 16, 16, 30, 16, 16, 31],
+            'L': [16, 16, 16, 16, 16, 16, 31],
+            'W': [17, 17, 17, 21, 21, 27, 17],
+            'R': [30, 17, 17, 30, 20, 18, 17],
+            'D': [30, 17, 17, 17, 17, 17, 30],
+            ' ': [0, 0, 0, 0, 0, 0, 0]
+        };
+
+        const text = "VOXEL WORLD";
+        const fontH = 7;
+        const fontW = 5;
+        const spacing = 1;
+        
+        // Calculate total dimensions in Blocks
+        const totalCharWidth = text.length * (fontW * scale);
+        const totalSpacingWidth = (text.length - 1) * (spacing * scale);
+        const totalWidth = totalCharWidth + totalSpacingWidth;
+        const totalHeight = fontH * scale;
+
+        const startX = -Math.floor(totalWidth / 2);
+
+        // Screen Background Padding
+        const padX = 10;
+        const padY = 10;
+        const screenW = totalWidth + padX * 2;
+        const screenH = totalHeight + padY * 2;
+
+        // Draw Massive Screen Backing (Dark Matter + Neon Frame)
+        const screenLeft = startX - padX;
+        const screenBottom = billboardY - totalHeight - padY;
+        
+        for(let bx = 0; bx < screenW; bx++) {
+            for(let by = 0; by < screenH; by++) {
+                const posX = screenLeft + bx;
+                const posY = screenBottom + by;
+                
+                // Border check
+                if (bx === 0 || bx === screenW - 1 || by === 0 || by === screenH - 1) {
+                    addBlock(BlockType.NEON_CYAN, posX, posY, billboardZ);
+                } else {
+                    addBlock(BlockType.DARK_MATTER, posX, posY, billboardZ);
+                }
+            }
+        }
+
+        // Draw Text
+        let cursorX = startX;
+        
+        for(let i = 0; i < text.length; i++) {
+            const char = text[i];
+            const map = FONT_MAP[char];
+            
+            if (map) {
+                for (let row = 0; row < 7; row++) {
+                    const bits = map[row];
+                    for (let col = 0; col < 5; col++) {
+                        if ((bits >> (4 - col)) & 1) {
+                            // Fill the scaled pixel (4x4 block chunk)
+                            for(let sx = 0; sx < scale; sx++) {
+                                for(let sy = 0; sy < scale; sy++) {
+                                    const px = cursorX + (col * scale) + sx;
+                                    const py = billboardY - (row * scale) - sy;
+                                    
+                                    // Gradient Logic: Left side Cyan, Right side Magenta
+                                    const progress = (i / text.length) + (col/5) * (1/text.length);
+                                    const type = progress > 0.5 ? BlockType.NEON_MAGENTA : BlockType.NEON_CYAN;
+                                    
+                                    addBlock(type, px, py, billboardZ + 1); // Pop out by 1
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            cursorX += (fontW * scale) + (spacing * scale);
+        }
+
+
         // Build Meshes
         const geo = new THREE.BoxGeometry(1,1,1);
         const smallGeo = new THREE.BoxGeometry(0.6,0.6,0.6);
@@ -501,20 +595,38 @@ export class WorldManager {
             const data = instances[key];
             if (data.count === 0) return;
             const isFlora = [BlockType.FLOWER_RED, BlockType.FLOWER_YELLOW, BlockType.TALL_GRASS].includes(key);
+            
+            // Material Setup
             const mat = new THREE.MeshStandardMaterial({ color: PALETTE[key], roughness: 0.8 });
-            if (key === BlockType.WATER) { mat.transparent = true; mat.opacity = 0.6; mat.roughness = 0.1; }
-            if (key === BlockType.CLOUD || key === BlockType.GLASS) { mat.transparent = true; mat.opacity = key===BlockType.CLOUD ? 0.8 : 0.4; }
+            
+            if (key === BlockType.WATER) { 
+                mat.transparent = true; mat.opacity = 0.6; mat.roughness = 0.1; 
+            }
+            if (key === BlockType.CLOUD || key === BlockType.GLASS) { 
+                mat.transparent = true; mat.opacity = key===BlockType.CLOUD ? 0.8 : 0.4; 
+            }
+            if (key === BlockType.NEON_CYAN || key === BlockType.NEON_MAGENTA) {
+                mat.emissive = new THREE.Color(PALETTE[key]);
+                mat.emissiveIntensity = 0.8;
+                mat.toneMapped = false; // Make it glow brighter
+            }
             
             const mesh = new THREE.InstancedMesh(isFlora ? smallGeo : geo, mat, data.count);
-            mesh.castShadow = !([BlockType.WATER, BlockType.CLOUD, BlockType.GLASS].includes(key));
+            // Neon blocks don't cast shadows, they glow
+            mesh.castShadow = !([BlockType.WATER, BlockType.CLOUD, BlockType.GLASS, BlockType.NEON_CYAN, BlockType.NEON_MAGENTA].includes(key));
             mesh.receiveShadow = true;
             
             const m4 = new THREE.Matrix4();
             for(let i=0; i<data.count; i++) {
                 m4.fromArray(data.matrix, i*16);
                 mesh.setMatrixAt(i, m4);
+                // Optimized interaction check: Only register blocks we might reasonably touch near surface or in known structures
+                // For the massive billboard, we skip registering individual blocks in the hashmap to save memory if they are too far,
+                // but here we register everything for consistency.
                 if(![BlockType.CLOUD, BlockType.WATER, BlockType.TALL_GRASS, BlockType.FLOWER_RED, BlockType.FLOWER_YELLOW].includes(key)){
                     const p = new THREE.Vector3().setFromMatrixPosition(m4);
+                    // Only register blocks within a reasonable interact distance for mining logic to save map lookup time? 
+                    // No, keep it simple for now.
                     const b = this.getBlock(p.x, p.y, p.z);
                     if(b) b.mesh = mesh;
                 }
