@@ -461,8 +461,9 @@ function App() {
   const particlesRef = useRef<ParticleSystem | null>(null);
   const playerRef = useRef<PlayerActor | null>(null);
   
-  // Camera Rig Refs
-  const cameraPivotRef = useRef(new THREE.Object3D());
+  // Camera Rig Refs - Separated for proper Euler rotation without gimbal lock/tilt
+  const cameraYawRef = useRef(new THREE.Group());
+  const cameraPitchRef = useRef(new THREE.Group());
   const cameraYaw = useRef(0);
   const cameraPitch = useRef(0);
 
@@ -612,9 +613,13 @@ function App() {
     const player = new PlayerActor(scene);
     playerRef.current = player;
     
-    scene.add(cameraPivotRef.current); 
-    cameraPivotRef.current.add(camera);
-    camera.position.set(0, 1.5, 4); 
+    // Camera Hierarchy: Yaw -> Pitch -> Camera
+    scene.add(cameraYawRef.current);
+    cameraYawRef.current.add(cameraPitchRef.current);
+    cameraPitchRef.current.add(camera);
+    
+    // Position camera in local space (relative to pitch pivot)
+    camera.position.set(0, 0.5, 4); // 4 units back, 0.5 units up
 
     physicsRef.current = new PhysicsController(world);
 
@@ -719,10 +724,11 @@ function App() {
         playerRef.current.update(delta, new THREE.Vector2(phys.velocity.x, phys.velocity.z).length(), phys.flying);
 
         // Update Camera Rig
+        // Position logic: Camera looks at player head, but is offset by hierarchy
         const lookTarget = phys.position.clone().add(new THREE.Vector3(0, 1.5, 0));
-        cameraPivotRef.current.position.copy(lookTarget);
-        cameraPivotRef.current.rotation.y = cameraYaw.current;
-        cameraPivotRef.current.rotation.x = cameraPitch.current;
+        cameraYawRef.current.position.copy(lookTarget);
+        cameraYawRef.current.rotation.y = cameraYaw.current;
+        cameraPitchRef.current.rotation.x = cameraPitch.current;
         
         // Mining Raycast (From camera center, ignoring player mesh)
         raycaster.setFromCamera(center, camera);
