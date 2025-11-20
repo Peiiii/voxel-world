@@ -280,6 +280,95 @@ class ParticleSystem {
     }
 }
 
+class CloudSystem {
+    private mesh: THREE.InstancedMesh;
+    private clouds: { x: number, y: number, z: number }[] = [];
+    private offset: number = 0;
+    private dummy = new THREE.Object3D();
+    private boundSize: number;
+
+    constructor(scene: THREE.Scene) {
+        // Using a simple box geometry but instanced
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const material = new THREE.MeshBasicMaterial({ 
+            color: 0xFFFFFF, 
+            transparent: true, 
+            opacity: 0.85 
+        });
+        
+        // Allocate instances
+        this.mesh = new THREE.InstancedMesh(geometry, material, 4000);
+        this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        this.mesh.castShadow = false;
+        this.mesh.receiveShadow = false;
+        scene.add(this.mesh);
+        
+        // Generate slightly wider than the world to allow seamless wrapping
+        this.boundSize = WORLD_SIZE * 2.5; 
+        this.generate();
+    }
+
+    generate() {
+        const noise = new SimpleNoise(Math.random() * 1000);
+        const noise2 = new SimpleNoise(Math.random() * 5000);
+        
+        const step = 4; // Clouds are larger blocks (4x4x4) for volumetric fluffiness and performance
+        const start = -this.boundSize / 2;
+        const end = this.boundSize / 2;
+        let count = 0;
+
+        for (let x = start; x < end; x += step) {
+            for (let z = start; z < end; z += step) {
+                // Low frequency noise for large cloud shapes
+                const n1 = noise.noise(x * 0.006, 120, z * 0.006);
+                // High frequency noise for detail edges
+                const n2 = noise2.noise(x * 0.03, 0, z * 0.03) * 0.25;
+                
+                const val = n1 + n2;
+                
+                // High threshold creates distinct islands (patches) of clouds
+                if (val > 0.35) {
+                    // Base height
+                    const h = 75 + (val - 0.35) * 15; 
+                    
+                    // Vertical thickness based on density
+                    const thickness = 1 + Math.floor((val - 0.35) * 5);
+                    
+                    for(let t=0; t<thickness; t++) {
+                        if (count < this.mesh.count) {
+                            this.clouds.push({ x, y: h + t * step, z });
+                            count++;
+                        }
+                    }
+                }
+            }
+        }
+        this.mesh.count = count;
+        this.update(0);
+    }
+
+    update(dt: number) {
+        this.offset += dt * 4; // Cloud drift speed
+        const half = this.boundSize / 2;
+
+        for(let i=0; i<this.clouds.length; i++) {
+            const c = this.clouds[i];
+            
+            let px = c.x + this.offset;
+            
+            // Wrap around logic for infinite scrolling
+            while(px > half) px -= this.boundSize;
+            while(px < -half) px += this.boundSize;
+
+            this.dummy.position.set(px, c.y, c.z);
+            this.dummy.scale.set(4, 4, 4); // Scale matches the step size
+            this.dummy.updateMatrix();
+            this.mesh.setMatrixAt(i, this.dummy.matrix);
+        }
+        this.mesh.instanceMatrix.needsUpdate = true;
+    }
+}
+
 export class WorldManager {
     public scene: THREE.Scene;
     public camera: THREE.PerspectiveCamera;
@@ -292,6 +381,7 @@ export class WorldManager {
     public mobs: Mob[] = [];
     public playerActor: PlayerActor | null = null;
     public particles: ParticleSystem | null = null;
+    public cloudSystem: CloudSystem | null = null;
     public selectionBox: SelectionBox | null = null;
     
     public instancedMeshes: THREE.InstancedMesh[] = [];
@@ -358,6 +448,7 @@ export class WorldManager {
         this.generateWorld();
         
         this.particles = new ParticleSystem(this.scene);
+        this.cloudSystem = new CloudSystem(this.scene);
         this.playerActor = new PlayerActor();
         this.scene.add(this.playerActor.mesh);
         this.selectionBox = new SelectionBox(this.scene);
@@ -540,24 +631,6 @@ export class WorldManager {
                 if (rand > 0.99 && !isRiver) {
                     this.mobs.push(new Mob(Math.random() > 0.5 ? 'cow' : 'sheep', x, h+1, z));
                     this.scene.add(this.mobs[this.mobs.length-1].mesh);
-                }
-            }
-        }
-
-        // Volumetric Clouds - Restricted to offset
-        const cloudNoise = new SimpleNoise(999);
-        const cloudHeight = 65; 
-        // Only generate clouds over the world area
-        for (let x = -offset; x < offset; x+=2) { // Step 2 for fluffier/less dense clouds
-            for (let z = -offset; z < offset; z+=2) {
-                const n = cloudNoise.noise(x * 0.015, 50, z * 0.015);
-                const d = cloudNoise.noise(x * 0.05, 0, z * 0.05) * 0.15;
-                const val = n + d;
-
-                if (val > 0.35) {
-                    storeBlock(BlockType.CLOUD, x, cloudHeight, z);
-                    if (val > 0.5) storeBlock(BlockType.CLOUD, x, cloudHeight + 1, z);
-                    if (val > 0.6) storeBlock(BlockType.CLOUD, x, cloudHeight + 2, z);
                 }
             }
         }
@@ -828,6 +901,7 @@ export class WorldManager {
 
         this.mobs.forEach(m => m.update(dt, this));
         if (this.particles) this.particles.update(dt);
+        if (this.cloudSystem) this.cloudSystem.update(dt);
 
         this.renderer.render(this.scene, this.camera);
     }
