@@ -13,6 +13,7 @@ export class PhysicsManager {
   private playerWidth = 0.6;
   private boxMin = new THREE.Vector3();
   private boxMax = new THREE.Vector3();
+  private coyoteTime = 0; // Time allowed to jump after leaving ground
 
   public setWorld = (world: WorldManager) => {
     this.world = world;
@@ -84,19 +85,30 @@ export class PhysicsManager {
     this.velocity.x *= friction;
     this.velocity.z *= friction;
 
+    if (this.onGround) {
+        this.coyoteTime = 0.15; // 150ms grace period
+    } else {
+        this.coyoteTime -= dt;
+    }
+
     if (this.flying) {
         this.velocity.y = 0;
         if (input.jump) this.velocity.y = 15;
         if (input.shift) this.velocity.y = -15;
     } else {
         this.velocity.y -= 32 * dt;
-        if (this.onGround && input.jump) {
-            this.velocity.y = 9;
+        
+        // Jump Logic
+        if ((this.onGround || this.coyoteTime > 0) && input.jump) {
+            this.velocity.y = 12; // Reliable jump height
             this.onGround = false;
+            this.coyoteTime = 0;
+            // Apply upward movement immediately to break ground contact
+            this.position.y += 0.1; 
         }
     }
 
-    const steps = 4; 
+    const steps = 6; 
     const subDt = dt / steps;
 
     for (let s = 0; s < steps; s++) {
@@ -104,7 +116,8 @@ export class PhysicsManager {
     }
 
     if (this.position.y < -30) {
-        this.position.set(0, 60, 0);
+        // Respawn if fallen
+        this.position.set(0, 30, 60);
         this.velocity.set(0, 0, 0);
     }
   }

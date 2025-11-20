@@ -26,7 +26,19 @@ export const BlockType = {
   CACTUS: 'cactus',
   BIRCH_WOOD: 'birch_wood',
   BIRCH_LEAVES: 'birch_leaves',
-  DEAD_BUSH: 'dead_bush'
+  DEAD_BUSH: 'dead_bush',
+  // Tao Hua Yuan Types
+  PEACH_WOOD: 'peach_wood',
+  PEACH_LEAVES: 'peach_leaves',
+  BAMBOO: 'bamboo',
+  PATH: 'path',
+  BRICK: 'brick',
+  ROOF_TILE: 'roof_tile',
+  WHITE_TILE: 'white_tile', // Mahjong
+  RED_WOOL: 'red_wool',     // Table/Carpet
+  SIGN_POST: 'sign_post',
+  FARMLAND: 'farmland',
+  WHEAT: 'wheat'
 };
 
 export const PALETTE = {
@@ -34,7 +46,7 @@ export const PALETTE = {
   [BlockType.DIRT]: 0x856042,
   [BlockType.STONE]: 0x919191,
   [BlockType.SAND]: 0xDCCFA3,
-  [BlockType.WATER]: 0x3F76E4,
+  [BlockType.WATER]: 0x42A5F5, // Lighter, clearer blue
   [BlockType.SNOW]: 0xFFFFFF,
   [BlockType.WOOD]: 0x5C4033,
   [BlockType.LEAVES]: 0x4A8F28,
@@ -48,12 +60,23 @@ export const PALETTE = {
   [BlockType.DARK_MATTER]: 0x050505,
   [BlockType.NEON_CYAN]: 0x00FFFF,
   [BlockType.NEON_MAGENTA]: 0xFF00CC,
-  // New Colors
   [BlockType.SANDSTONE]: 0xC6AE82,
   [BlockType.CACTUS]: 0x537C28,
   [BlockType.BIRCH_WOOD]: 0xE3D6C5,
   [BlockType.BIRCH_LEAVES]: 0x80A755,
-  [BlockType.DEAD_BUSH]: 0x946838
+  [BlockType.DEAD_BUSH]: 0x946838,
+  // Village Colors
+  [BlockType.PEACH_WOOD]: 0x5C3A21,
+  [BlockType.PEACH_LEAVES]: 0xFFB7C5, // Pink
+  [BlockType.BAMBOO]: 0x6FA830,
+  [BlockType.PATH]: 0x917857,
+  [BlockType.BRICK]: 0x8E5645,
+  [BlockType.ROOF_TILE]: 0x333344, // Dark Slate/Blueish
+  [BlockType.WHITE_TILE]: 0xF0F0F0,
+  [BlockType.RED_WOOL]: 0xCC3333,
+  [BlockType.SIGN_POST]: 0x725538,
+  [BlockType.FARMLAND]: 0x4F3321,
+  [BlockType.WHEAT]: 0xDCBB24
 };
 
 export const HARDNESS: Record<string, number> = {
@@ -76,7 +99,18 @@ export const HARDNESS: Record<string, number> = {
     [BlockType.CACTUS]: 400,
     [BlockType.BIRCH_WOOD]: 1500,
     [BlockType.BIRCH_LEAVES]: 250,
-    [BlockType.DEAD_BUSH]: 100
+    [BlockType.DEAD_BUSH]: 100,
+    [BlockType.PEACH_WOOD]: 1500,
+    [BlockType.PEACH_LEAVES]: 250,
+    [BlockType.BAMBOO]: 300,
+    [BlockType.PATH]: 600,
+    [BlockType.BRICK]: 2000,
+    [BlockType.ROOF_TILE]: 2000,
+    [BlockType.WHITE_TILE]: 500,
+    [BlockType.RED_WOOL]: 300,
+    [BlockType.SIGN_POST]: 1000,
+    [BlockType.FARMLAND]: 600,
+    [BlockType.WHEAT]: 100
 };
 
 // --- PERLIN NOISE ---

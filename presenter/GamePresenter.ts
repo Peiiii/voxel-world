@@ -35,6 +35,9 @@ export class GamePresenter {
             try {
                 this.world.init(container);
                 this.physics.setWorld(this.world);
+                // Set spawn point safely
+                this.physics.position.copy(this.world.spawnPoint);
+                
                 const loadingEl = document.getElementById('loading');
                 if (loadingEl) loadingEl.style.display = 'none';
             } catch (e) {
@@ -180,10 +183,9 @@ export class GamePresenter {
         this.physics.step(dt, this.cameraYaw, this.input.keys);
 
         if (useGameStore.getState().isLocked) {
-            // Update Raycaster - Use the Center of the screen which corresponds to the Camera's forward vector
-            // Since our camera is offset, we still raycast from the camera's position forward
+            // Update Raycaster
             this.raycaster.setFromCamera(new THREE.Vector2(0,0), this.world.camera);
-            this.raycaster.far = 6;
+            this.raycaster.far = 10; // Increased reach distance (Minecraft Survival is ~4.5, Creative ~5-6, extended to 10 for user req)
             const intersects = this.raycaster.intersectObjects(this.world.instancedMeshes);
             
             let found = false;
