@@ -9,6 +9,9 @@ export class InputManager {
     shift: false
   };
 
+  // Virtual Joystick State
+  private virtualMove = { x: 0, y: 0 };
+
   public init = () => {
     document.addEventListener('keydown', this.onKeyDown);
     document.addEventListener('keyup', this.onKeyUp);
@@ -17,6 +20,26 @@ export class InputManager {
   public dispose = () => {
     document.removeEventListener('keydown', this.onKeyDown);
     document.removeEventListener('keyup', this.onKeyUp);
+  }
+
+  // API for Mobile Controls
+  public setVirtualMove = (x: number, y: number) => {
+      this.virtualMove.x = x;
+      this.virtualMove.y = y;
+      this.updateKeysFromVirtual();
+  }
+
+  public setButton = (btn: 'jump' | 'shift', pressed: boolean) => {
+      this.keys[btn] = pressed;
+  }
+
+  private updateKeysFromVirtual = () => {
+      // Threshold to prevent drift
+      const threshold = 0.2;
+      this.keys.f = this.virtualMove.y < -threshold;
+      this.keys.b = this.virtualMove.y > threshold;
+      this.keys.l = this.virtualMove.x < -threshold;
+      this.keys.r = this.virtualMove.x > threshold;
   }
 
   private onKeyDown = (e: KeyboardEvent) => {

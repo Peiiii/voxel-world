@@ -19,28 +19,27 @@ export class GamePresenter {
     private targetBlock: any = null;
     private raycaster = new THREE.Raycaster();
     private loopId: number = 0;
+    
+    // Touch handling
+    private lastTouchX = 0;
+    private lastTouchY = 0;
+    public isMobile = false;
 
     public init = (container: HTMLElement) => {
-        // 1. Setup Controls FIRST so events are caught immediately
+        this.isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        
         this.setupControls();
         this.input.init();
 
-        // 2. Initialize World (Heavy Operation)
-        // We use a timeout to allow the browser to render the 'Loading' state if needed before freezing for generation
         setTimeout(() => {
             try {
                 this.world.init(container);
                 this.physics.setWorld(this.world);
-                
-                // Hide loading screen
                 const loadingEl = document.getElementById('loading');
                 if (loadingEl) loadingEl.style.display = 'none';
-
             } catch (e) {
                 console.error("Failed to initialize world:", e);
             }
-            
-            // 3. Start Loop
             this.startLoop();
         }, 10);
     }
@@ -54,6 +53,8 @@ export class GamePresenter {
         document.removeEventListener('mousedown', this.onMouseDown);
         document.removeEventListener('mouseup', this.onMouseUp);
         document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+        document.removeEventListener('touchmove', this.onTouchMove);
+        document.removeEventListener('touchstart', this.onTouchStart);
     }
 
     private setupControls = () => {
@@ -62,19 +63,63 @@ export class GamePresenter {
         document.addEventListener('mouseup', this.onMouseUp);
         document.addEventListener('pointerlockchange', this.onPointerLockChange);
         document.addEventListener('pointerlockerror', (e) => console.error("Pointer Lock Error", e));
+        
+        // Touch controls for camera look
+        document.addEventListener('touchmove', this.onTouchMove, { passive: false });
+        document.addEventListener('touchstart', this.onTouchStart, { passive: false });
     }
 
     private onPointerLockChange = () => {
-        // Check if ANY element is locked, not just body. 
-        // This fixes issues where browsers might report the specific element instead of body.
         const isLocked = !!document.pointerLockElement;
         useGameStore.getState().setLocked(isLocked);
     }
 
     public requestPointerLock = () => {
-        // Request lock on body to cover full screen
-        const element = document.body;
-        element.requestPointerLock();
+        if (this.isMobile) {
+            // Mobile: Bypass pointer lock API and just start the game
+            useGameStore.getState().setLocked(true);
+        } else {
+            // Desktop: Request actual lock
+            document.body.requestPointerLock();
+        }
+    }
+
+    private onTouchStart = (e: TouchEvent) => {
+        // Only track the first touch that isn't on a control interface
+        // Simple heuristic: if it's on the right side of the screen and not a button
+        for (let i = 0; i < e.touches.length; i++) {
+            const t = e.touches[i];
+            // If touch is on the right 2/3rds of screen, treat as camera look (simplification)
+            // The UI layer handles the buttons, preventing default if touched there
+            if (t.clientX > window.innerWidth * 0.3) {
+                this.lastTouchX = t.clientX;
+                this.lastTouchY = t.clientY;
+            }
+        }
+    }
+
+    private onTouchMove = (e: TouchEvent) => {
+        if (!useGameStore.getState().isLocked) return;
+        
+        // Prevent scrolling
+        if(e.cancelable) e.preventDefault();
+
+        for (let i = 0; i < e.touches.length; i++) {
+            const t = e.touches[i];
+            // Simple logic: If touch started on right side (camera zone)
+            if (t.clientX > window.innerWidth * 0.3) {
+                const dx = t.clientX - this.lastTouchX;
+                const dy = t.clientY - this.lastTouchY;
+                
+                const sensitivity = 0.005;
+                this.cameraYaw -= dx * sensitivity;
+                this.cameraPitch -= dy * sensitivity;
+                this.cameraPitch = Math.max(-Math.PI/2+0.1, Math.min(Math.PI/2-0.1, this.cameraPitch));
+
+                this.lastTouchX = t.clientX;
+                this.lastTouchY = t.clientY;
+            }
+        }
     }
 
     private onMouseMove = (e: MouseEvent) => {
@@ -86,15 +131,24 @@ export class GamePresenter {
     }
 
     private onMouseDown = () => {
-        if (useGameStore.getState().isLocked) {
-            this.isMining = true;
-            this.mineStartTime = performance.now();
+        // On desktop, click to mine. On mobile, we use a button.
+        if (!this.isMobile && useGameStore.getState().isLocked) {
+            this.startMining();
         }
     }
 
-    private onMouseUp = () => {
+    public startMining = () => {
+        this.isMining = true;
+        this.mineStartTime = performance.now();
+    }
+
+    public stopMining = () => {
         this.isMining = false;
         useGameStore.getState().setMiningProgress(0);
+    }
+
+    private onMouseUp = () => {
+        if (!this.isMobile) this.stopMining();
     }
 
     private startLoop = () => {
@@ -110,14 +164,12 @@ export class GamePresenter {
 
         const { setMiningProgress, setIsFlying } = useGameStore.getState();
 
-        // Sync Flight state
         if (this.physics.flying !== useGameStore.getState().isFlying) {
            setIsFlying(this.physics.flying);
         }
 
         this.physics.step(dt, this.cameraYaw, this.input.keys);
 
-        // Mining Logic
         if (useGameStore.getState().isLocked) {
             this.raycaster.setFromCamera(new THREE.Vector2(0,0), this.world.camera);
             this.raycaster.far = 6;
