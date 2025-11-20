@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { BlockType, PALETTE, SimpleNoise, WORLD_SIZE, WATER_LEVEL } from '../utils/constants';
 
-// --- SUB-CLASSES (Internal to World Manager for now to keep simplicity) ---
+// --- SUB-CLASSES ---
 
 class SelectionBox {
     public mesh: THREE.LineSegments;
@@ -302,9 +302,9 @@ export class WorldManager {
         // Init base ThreeJS objects
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87CEEB);
-        this.scene.fog = new THREE.Fog(0x87CEEB, 30, 180); // Increased fog distance for the giant screen
+        this.scene.fog = new THREE.Fog(0x87CEEB, 40, 140); 
 
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300); // Increased far plane
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300);
         
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -313,29 +313,26 @@ export class WorldManager {
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
         // Camera Rig
-        // Yaw Group handles Horizontal Rotation and Physics Position
         this.cameraYawGroup = new THREE.Group();
         this.scene.add(this.cameraYawGroup);
 
-        // Pitch Group handles Vertical Rotation and Pivot Point (Eyes)
         this.cameraPitchGroup = new THREE.Group();
-        this.cameraPitchGroup.position.y = 1.6; // Eye Height
+        this.cameraPitchGroup.position.y = 1.6; 
         this.cameraYawGroup.add(this.cameraPitchGroup);
         
-        // Camera Object handles Distance (Zoom)
         this.cameraPitchGroup.add(this.camera);
-        this.camera.position.set(1.2, 0, 4); // Initial Right Shoulder Offset
+        this.camera.position.set(1.2, 0, 4);
 
         // Lighting
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
         this.scene.add(ambientLight);
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
         dirLight.position.set(50, 150, 50);
         dirLight.castShadow = true;
         dirLight.shadow.mapSize.set(4096, 4096);
         dirLight.shadow.camera.near = 0.5;
         dirLight.shadow.camera.far = 300;
-        const sSize = 120; // Increased shadow map coverage
+        const sSize = 140;
         dirLight.shadow.camera.left = -sSize; dirLight.shadow.camera.right = sSize;
         dirLight.shadow.camera.top = sSize; dirLight.shadow.camera.bottom = -sSize;
         dirLight.shadow.bias = -0.0004;
@@ -371,7 +368,7 @@ export class WorldManager {
     public isSolid = (x: number, y: number, z: number) => {
         const block = this.getBlock(x, y, z);
         if (!block) return false;
-        const nonSolid = [BlockType.WATER, BlockType.CLOUD, BlockType.FLOWER_RED, BlockType.FLOWER_YELLOW, BlockType.TALL_GRASS];
+        const nonSolid = [BlockType.WATER, BlockType.CLOUD, BlockType.FLOWER_RED, BlockType.FLOWER_YELLOW, BlockType.TALL_GRASS, BlockType.DEAD_BUSH];
         return !nonSolid.includes(block.type);
     }
 
@@ -408,14 +405,9 @@ export class WorldManager {
             instances[type].matrix.push(...dummy.matrix.elements);
             instances[type].count++;
             
-            // Track blocks for interaction
-            const interactables = [
-                BlockType.GRASS, BlockType.DIRT, BlockType.STONE, BlockType.SAND, 
-                BlockType.WOOD, BlockType.PLANKS, BlockType.OBSIDIAN, 
-                BlockType.DARK_MATTER, BlockType.NEON_CYAN, BlockType.NEON_MAGENTA
-            ];
-            
-            if (interactables.includes(type)) {
+            // Track interactable blocks
+            const nonInteractables = [BlockType.CLOUD, BlockType.WATER];
+            if (!nonInteractables.includes(type)) {
                 this.blocks.set(`${Math.round(x)},${Math.round(y)},${Math.round(z)}`, { 
                     type, 
                     instanceId: instances[type].count - 1,
@@ -424,86 +416,174 @@ export class WorldManager {
             }
         };
 
-        const noiseGen = new SimpleNoise();
-        const offset = WORLD_SIZE / 2;
-        const heightMap = new Map<string, number>();
+        // --- NOISE GENERATORS ---
+        const heightNoise = new SimpleNoise(0);
+        const moistureNoise = new SimpleNoise(100); // Determines biome (Desert vs Forest)
+        const riverNoise = new SimpleNoise(500);    // Determines rivers
 
+        const offset = WORLD_SIZE / 2;
+        const heightMap = new Map<string, { h: number, biome: string, isRiver: boolean }>();
+
+        // First Pass: Terrain Height & Biomes
         for (let x = -offset; x < offset; x++) {
             for (let z = -offset; z < offset; z++) {
-                let y = noiseGen.noise(x * 0.02, 0, z * 0.02) * 18;
-                y += noiseGen.noise(x * 0.1, 100, z * 0.1) * 4;
-                const h = Math.round(y + 12);
-                heightMap.set(`${x},${z}`, h);
+                
+                // 1. Biome Determination
+                const mVal = moistureNoise.noise(x * 0.015, 0, z * 0.015);
+                let biome = 'PLAINS';
+                if (mVal > 0.4) biome = 'FOREST';
+                if (mVal < -0.4) biome = 'DESERT';
+                
+                // 2. River Determination
+                // Use warped noise for better rivers, but simple abs threshold is enough for voxel style
+                const rVal = Math.abs(riverNoise.noise(x * 0.012, 0, z * 0.012));
+                const isRiver = rVal < 0.035;
 
+                // 3. Height Calculation
+                // Base height
+                let h = 0;
+                
+                if (biome === 'DESERT') {
+                    // Flatter
+                    h = 10 + heightNoise.noise(x * 0.03, 0, z * 0.03) * 6;
+                } else if (biome === 'PLAINS') {
+                    // Gentle hills
+                    h = 12 + heightNoise.noise(x * 0.02, 0, z * 0.02) * 8;
+                } else if (biome === 'FOREST') {
+                    // Hillier
+                    h = 14 + heightNoise.noise(x * 0.04, 0, z * 0.04) * 12;
+                } else {
+                    // Default fallthrough (shouldn't happen much)
+                    h = 12 + heightNoise.noise(x * 0.03, 0, z * 0.03) * 10;
+                }
+
+                // Mountain Peaks override (rare high spots in non-desert)
+                const peakNoise = heightNoise.noise(x * 0.05 + 100, 100, z * 0.05 + 100);
+                if (peakNoise > 0.6 && biome !== 'DESERT') {
+                    biome = 'MOUNTAIN';
+                    h += (peakNoise - 0.6) * 40;
+                }
+
+                // River carving
+                if (isRiver) {
+                    h = Math.min(h, WATER_LEVEL - 1);
+                }
+
+                h = Math.round(h);
+                heightMap.set(`${x},${z}`, { h, biome, isRiver });
+
+                // 4. Block Filling
                 let surfaceType = BlockType.GRASS;
-                if (h < WATER_LEVEL + 2) surfaceType = BlockType.SAND;
-                if (h > 28) surfaceType = BlockType.STONE;
-                if (h > 35) surfaceType = BlockType.SNOW;
+                let subSurfaceType = BlockType.DIRT;
+
+                if (biome === 'DESERT') {
+                    surfaceType = BlockType.SAND;
+                    subSurfaceType = BlockType.SANDSTONE;
+                } else if (biome === 'MOUNTAIN') {
+                    if (h > 35) surfaceType = BlockType.SNOW;
+                    else surfaceType = BlockType.STONE;
+                    subSurfaceType = BlockType.STONE;
+                }
+
+                if (isRiver || h <= WATER_LEVEL) {
+                   surfaceType = (biome === 'DESERT') ? BlockType.SAND : BlockType.DIRT;
+                   if (h <= WATER_LEVEL - 3) surfaceType = BlockType.STONE;
+                }
 
                 for (let dy = -4; dy <= h; dy++) {
-                    let type = surfaceType;
-                    if (dy < h) { type = BlockType.DIRT; if (h > 28) type = BlockType.STONE; }
+                    let type = subSurfaceType;
+                    if (dy === h) type = surfaceType;
                     if (dy < h - 3) type = BlockType.STONE;
-                    if (dy > h && dy <= WATER_LEVEL) type = BlockType.WATER;
-                    else if (dy > h) continue;
+                    
                     addBlock(type, x, dy, z);
+                }
+                
+                // Water filling
+                if (isRiver || h < WATER_LEVEL) {
+                    for (let w = h + 1; w <= WATER_LEVEL; w++) {
+                        addBlock(BlockType.WATER, x, w, z);
+                    }
                 }
             }
         }
 
-        // Decoration Pass
+        // Second Pass: Decoration (Trees, Cactus, Flowers)
         for (let x = -offset + 2; x < offset - 2; x++) {
             for (let z = -offset + 2; z < offset - 2; z++) {
-                const h = heightMap.get(`${x},${z}`)!;
-                const surface = this.getBlock(x, h, z);
-                
-                if (surface && surface.type === BlockType.GRASS && h > WATER_LEVEL) {
-                    const rand = Math.random();
-                    if (rand < 0.015) { // Tree
-                        const th = 4 + Math.floor(Math.random() * 2);
-                        for(let i=1; i<=th; i++) addBlock(BlockType.WOOD, x, h+i, z);
-                        for(let lx = -2; lx <= 2; lx++) {
-                            for(let lz = -2; lz <= 2; lz++) {
-                                for(let ly = th - 1; ly <= th + 1; ly++) {
-                                    if (Math.abs(lx) + Math.abs(lz) + Math.abs(ly - th) < 4) {
-                                        if(lx===0 && lz===0 && ly < th+1) continue;
-                                        addBlock(BlockType.LEAVES, x+lx, h+ly, z+lz);
-                                    }
-                                }
-                            }
-                        }
-                    } else if (rand < 0.08) { // Flower
-                        addBlock(rand < 0.03 ? BlockType.FLOWER_RED : (rand < 0.05 ? BlockType.FLOWER_YELLOW : BlockType.TALL_GRASS), x, h+1, z);
-                    } else if (rand > 0.995 && x%2===0 && z%2===0) { // House
-                        let flat = true;
-                        for(let hx=-2; hx<=2; hx++) for(let hz=-2; hz<=2; hz++) if (Math.abs(heightMap.get(`${x+hx},${z+hz}`)! - h) > 1) flat = false;
-                        if (flat) {
-                            for(let bx=-2; bx<=2; bx++) for(let bz=-2; bz<=2; bz++) for(let by=0; by<4; by++) {
-                                if (bx===-2||bx===2||bz===-2||bz===2) {
-                                    if (by===1 && bx!==0 && bz!==0) addBlock(BlockType.GLASS, x+bx, h+1+by, z+bz);
-                                    else if (!(bx===0 && bz===2 && by < 2)) addBlock(BlockType.PLANKS, x+bx, h+1+by, z+bz);
-                                } else if (by===0) addBlock(BlockType.PLANKS, x+bx, h+1, z+bz);
-                                addBlock(BlockType.WOOD, x+bx, h+4, z+bz);
-                            }
-                        }
-                    } else if (rand > 0.98) { // Mobs
-                         this.mobs.push(new Mob(Math.random() > 0.5 ? 'cow' : 'sheep', x, h+1, z));
-                         this.scene.add(this.mobs[this.mobs.length-1].mesh);
+                const data = heightMap.get(`${x},${z}`);
+                if (!data) continue;
+                const { h, biome, isRiver } = data;
+
+                // Don't decorate in water
+                if (h <= WATER_LEVEL) continue;
+
+                const rand = Math.random();
+
+                if (biome === 'DESERT') {
+                    if (rand < 0.015) {
+                        // Cactus
+                        const ch = 2 + Math.floor(Math.random() * 3);
+                        for(let i=1; i<=ch; i++) addBlock(BlockType.CACTUS, x, h+i, z);
+                    } else if (rand < 0.05) {
+                        addBlock(BlockType.DEAD_BUSH, x, h+1, z);
                     }
+                } else if (biome === 'PLAINS') {
+                    if (rand < 0.005) { // Sparse Trees
+                        this.generateTree(x, h, z, addBlock, 'OAK');
+                    } else if (rand < 0.1) {
+                        const f = rand < 0.05 ? BlockType.FLOWER_RED : BlockType.FLOWER_YELLOW;
+                        addBlock(rand < 0.02 ? BlockType.TALL_GRASS : f, x, h+1, z);
+                    }
+                } else if (biome === 'FOREST') {
+                     if (rand < 0.035) { // Dense Trees
+                        this.generateTree(x, h, z, addBlock, rand > 0.5 ? 'BIRCH' : 'OAK');
+                    } else if (rand < 0.15) {
+                        addBlock(BlockType.TALL_GRASS, x, h+1, z);
+                    }
+                }
+
+                // Mobs
+                if (rand > 0.99 && !isRiver) {
+                    this.mobs.push(new Mob(Math.random() > 0.5 ? 'cow' : 'sheep', x, h+1, z));
+                    this.scene.add(this.mobs[this.mobs.length-1].mesh);
                 }
             }
         }
         
         // Clouds
-        for(let i=0; i<50; i++) {
-           const cx = (Math.random()-0.5)*WORLD_SIZE*2, cz = (Math.random()-0.5)*WORLD_SIZE*2, cy = 55+Math.random()*10;
+        for(let i=0; i<60; i++) {
+           const cx = (Math.random()-0.5)*WORLD_SIZE*1.5, cz = (Math.random()-0.5)*WORLD_SIZE*1.5, cy = 60+Math.random()*15;
            for(let j=0; j<8+Math.random()*10; j++) addBlock(BlockType.CLOUD, cx+Math.random()*10, cy, cz+Math.random()*10);
         }
 
-        // --- MASSIVE VOXEL WORLD BILLBOARD ---
-        const billboardZ = -offset - 20; // Push it back further so it dominates the horizon
-        const billboardY = 70; // Very high up
-        const scale = 4; // 4x4 blocks per pixel! MASSIVE.
+        this.createBillboard(addBlock);
+        this.buildMeshes(instances);
+    }
+
+    private generateTree(x: number, y: number, z: number, addBlock: Function, type: 'OAK' | 'BIRCH') {
+        const woodType = type === 'OAK' ? BlockType.WOOD : BlockType.BIRCH_WOOD;
+        const leafType = type === 'OAK' ? BlockType.LEAVES : BlockType.BIRCH_LEAVES;
+        
+        const h = 4 + Math.floor(Math.random() * 3); // Trunk Height
+
+        for(let i=1; i<=h; i++) addBlock(woodType, x, y+i, z);
+        
+        for(let lx = -2; lx <= 2; lx++) {
+            for(let lz = -2; lz <= 2; lz++) {
+                for(let ly = h - 1; ly <= h + 1; ly++) {
+                    if (Math.abs(lx) + Math.abs(lz) + Math.abs(ly - h) < 4) {
+                        if(lx===0 && lz===0 && ly < h+1) continue;
+                        addBlock(leafType, x+lx, y+ly, z+lz);
+                    }
+                }
+            }
+        }
+    }
+
+    private createBillboard(addBlock: Function) {
+        const billboardZ = -WORLD_SIZE/2 - 10;
+        const billboardY = 70;
+        const scale = 4;
 
         const FONT_MAP: Record<string, number[]> = {
             'V': [17, 17, 17, 17, 10, 10, 4],
@@ -518,7 +598,6 @@ export class WorldManager {
         };
 
         const text = "VOXEL WORLD";
-        const fontH = 7;
         const fontW = 5;
         const spacing = 1;
         
@@ -526,26 +605,23 @@ export class WorldManager {
         const totalCharWidth = text.length * (fontW * scale);
         const totalSpacingWidth = (text.length - 1) * (spacing * scale);
         const totalWidth = totalCharWidth + totalSpacingWidth;
-        const totalHeight = fontH * scale;
-
+        
         const startX = -Math.floor(totalWidth / 2);
 
         // Screen Background Padding
-        const padX = 10;
-        const padY = 10;
+        const padX = 6;
+        const padY = 6;
         const screenW = totalWidth + padX * 2;
-        const screenH = totalHeight + padY * 2;
+        const screenH = (7 * scale) + padY * 2;
 
-        // Draw Massive Screen Backing (Dark Matter + Neon Frame)
         const screenLeft = startX - padX;
-        const screenBottom = billboardY - totalHeight - padY;
+        const screenBottom = billboardY - (7*scale) - padY;
         
         for(let bx = 0; bx < screenW; bx++) {
             for(let by = 0; by < screenH; by++) {
                 const posX = screenLeft + bx;
                 const posY = screenBottom + by;
                 
-                // Border check
                 if (bx === 0 || bx === screenW - 1 || by === 0 || by === screenH - 1) {
                     addBlock(BlockType.NEON_CYAN, posX, posY, billboardZ);
                 } else {
@@ -554,29 +630,22 @@ export class WorldManager {
             }
         }
 
-        // Draw Text
         let cursorX = startX;
-        
         for(let i = 0; i < text.length; i++) {
             const char = text[i];
             const map = FONT_MAP[char];
-            
             if (map) {
                 for (let row = 0; row < 7; row++) {
                     const bits = map[row];
                     for (let col = 0; col < 5; col++) {
                         if ((bits >> (4 - col)) & 1) {
-                            // Fill the scaled pixel (4x4 block chunk)
                             for(let sx = 0; sx < scale; sx++) {
                                 for(let sy = 0; sy < scale; sy++) {
                                     const px = cursorX + (col * scale) + sx;
                                     const py = billboardY - (row * scale) - sy;
-                                    
-                                    // Gradient Logic: Left side Cyan, Right side Magenta
                                     const progress = (i / text.length) + (col/5) * (1/text.length);
                                     const type = progress > 0.5 ? BlockType.NEON_MAGENTA : BlockType.NEON_CYAN;
-                                    
-                                    addBlock(type, px, py, billboardZ + 1); // Pop out by 1
+                                    addBlock(type, px, py, billboardZ + 1);
                                 }
                             }
                         }
@@ -585,18 +654,24 @@ export class WorldManager {
             }
             cursorX += (fontW * scale) + (spacing * scale);
         }
+    }
 
-
-        // Build Meshes
+    private buildMeshes(instances: Record<string, { matrix: number[], count: number }>) {
         const geo = new THREE.BoxGeometry(1,1,1);
-        const smallGeo = new THREE.BoxGeometry(0.6,0.6,0.6);
+        const smallGeo = new THREE.BoxGeometry(0.6,0.6,0.6); // Flowers/Grass
+        const poleGeo = new THREE.BoxGeometry(0.85, 1, 0.85); // Cactus
+        const flatGeo = new THREE.BoxGeometry(0.8, 0.6, 0.8); // Dead Bush
         
         Object.keys(instances).forEach(key => {
             const data = instances[key];
             if (data.count === 0) return;
-            const isFlora = [BlockType.FLOWER_RED, BlockType.FLOWER_YELLOW, BlockType.TALL_GRASS].includes(key);
             
-            // Material Setup
+            let geometry = geo;
+            const isFlora = [BlockType.FLOWER_RED, BlockType.FLOWER_YELLOW, BlockType.TALL_GRASS].includes(key);
+            if (isFlora) geometry = smallGeo;
+            if (key === BlockType.CACTUS) geometry = poleGeo;
+            if (key === BlockType.DEAD_BUSH) geometry = flatGeo;
+            
             const mat = new THREE.MeshStandardMaterial({ color: PALETTE[key], roughness: 0.8 });
             
             if (key === BlockType.WATER) { 
@@ -608,11 +683,10 @@ export class WorldManager {
             if (key === BlockType.NEON_CYAN || key === BlockType.NEON_MAGENTA) {
                 mat.emissive = new THREE.Color(PALETTE[key]);
                 mat.emissiveIntensity = 0.8;
-                mat.toneMapped = false; // Make it glow brighter
+                mat.toneMapped = false;
             }
             
-            const mesh = new THREE.InstancedMesh(isFlora ? smallGeo : geo, mat, data.count);
-            // Neon blocks don't cast shadows, they glow
+            const mesh = new THREE.InstancedMesh(geometry, mat, data.count);
             mesh.castShadow = !([BlockType.WATER, BlockType.CLOUD, BlockType.GLASS, BlockType.NEON_CYAN, BlockType.NEON_MAGENTA].includes(key));
             mesh.receiveShadow = true;
             
@@ -620,16 +694,10 @@ export class WorldManager {
             for(let i=0; i<data.count; i++) {
                 m4.fromArray(data.matrix, i*16);
                 mesh.setMatrixAt(i, m4);
-                // Optimized interaction check: Only register blocks we might reasonably touch near surface or in known structures
-                // For the massive billboard, we skip registering individual blocks in the hashmap to save memory if they are too far,
-                // but here we register everything for consistency.
-                if(![BlockType.CLOUD, BlockType.WATER, BlockType.TALL_GRASS, BlockType.FLOWER_RED, BlockType.FLOWER_YELLOW].includes(key)){
-                    const p = new THREE.Vector3().setFromMatrixPosition(m4);
-                    // Only register blocks within a reasonable interact distance for mining logic to save map lookup time? 
-                    // No, keep it simple for now.
-                    const b = this.getBlock(p.x, p.y, p.z);
-                    if(b) b.mesh = mesh;
-                }
+                
+                const p = new THREE.Vector3().setFromMatrixPosition(m4);
+                const b = this.getBlock(p.x, p.y, p.z);
+                if(b) b.mesh = mesh;
             }
             this.scene.add(mesh);
             this.instancedMeshes.push(mesh);
@@ -637,26 +705,17 @@ export class WorldManager {
     }
 
     public render = (dt: number, cameraYaw: number, cameraPitch: number, physPos: THREE.Vector3, physVel: THREE.Vector3, isFlying: boolean) => {
-        // Lerp visual position (Physics Y is at feet)
         this.cameraYawGroup.position.x = physPos.x;
         this.cameraYawGroup.position.z = physPos.z;
         this.cameraYawGroup.position.y = THREE.MathUtils.lerp(this.cameraYawGroup.position.y, physPos.y, dt * 15);
         
-        // Apply rotation to Groups
         this.cameraYawGroup.rotation.y = cameraYaw;
         this.cameraPitchGroup.rotation.x = cameraPitch;
 
-        // --- SMART CAMERA COLLISION LOGIC ---
-        
-        // 1. Calculate the "Ideal" local position of the camera (Right Shoulder)
-        // Ideally it's at (1.2, 0, 4) relative to the Head Pivot (PitchGroup)
         const idealLocal = new THREE.Vector3(1.2, 0.0, 4.0); 
+        const pivotWorld = new THREE.Vector3(0,0,0).applyMatrix4(this.cameraPitchGroup.matrixWorld);
+        const idealWorld = idealLocal.clone().applyMatrix4(this.cameraPitchGroup.matrixWorld);
 
-        // 2. Calculate World Coordinates
-        const pivotWorld = new THREE.Vector3(0,0,0).applyMatrix4(this.cameraPitchGroup.matrixWorld); // Head position
-        const idealWorld = idealLocal.clone().applyMatrix4(this.cameraPitchGroup.matrixWorld); // Target Camera position
-
-        // 3. Raycast from Pivot (Head) to Ideal Camera Pos
         const dir = new THREE.Vector3().subVectors(idealWorld, pivotWorld);
         const dist = dir.length();
         dir.normalize();
@@ -665,23 +724,17 @@ export class WorldManager {
         this.cameraRaycaster.far = dist;
         const intersects = this.cameraRaycaster.intersectObjects(this.instancedMeshes);
 
-        // 4. Determine actual distance based on collision
-        // If hit, move camera to hit point (minus buffer)
         const actualDist = (intersects.length > 0) ? Math.max(0.2, intersects[0].distance - 0.2) : dist;
         const ratio = actualDist / dist;
 
-        // 5. Apply to Camera (Local position scales towards 0,0,0 based on collision ratio)
         this.camera.position.copy(idealLocal).multiplyScalar(ratio);
 
-
-        // Update Player Mesh (Sync with Camera Rig)
         if (this.playerActor) {
             this.playerActor.setPosition(this.cameraYawGroup.position);
             this.playerActor.setRotation(cameraYaw);
             this.playerActor.update(dt, new THREE.Vector2(physVel.x, physVel.z).length(), isFlying);
         }
 
-        // Update Mobs & Particles
         this.mobs.forEach(m => m.update(dt, this));
         if (this.particles) this.particles.update(dt);
 
