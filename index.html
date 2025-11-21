@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -108,7 +109,6 @@
         left: 0;
         width: 100%;
         height: 100%;
-        background: rgba(0,0,0,0.7);
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -116,14 +116,10 @@
         color: white;
         pointer-events: auto;
         z-index: 10;
-        backdrop-filter: blur(5px);
       }
+      /* Title Removed as it is now in 3D */
       #start-screen h1 {
-        font-size: 4rem;
-        margin-bottom: 1rem;
-        background: linear-gradient(to right, #4fa4b8, #fff);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        display: none;
       }
       .btn {
         background: #4fa4b8;
@@ -134,7 +130,8 @@
         border-radius: 50px;
         cursor: pointer;
         transition: transform 0.2s, background 0.2s;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.4);
+        text-shadow: 0 1px 2px rgba(0,0,0,0.3);
       }
       .btn:hover {
         background: #3d8293;
@@ -156,10 +153,6 @@
 </head>
   <body>
     <div id="root"></div>
-    
-    <!-- UI Layer is handled by React Portals or Absolute Positioning within root, 
-         but we keep the legacy structure clean. React will inject into root. -->
-
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>

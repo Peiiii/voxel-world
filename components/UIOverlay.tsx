@@ -7,7 +7,9 @@ export const UIOverlay: React.FC = () => {
   const isLocked = useGameStore(state => state.isLocked);
   const miningProgress = useGameStore(state => state.miningProgress);
   const gameStarted = useGameStore(state => state.gameStarted);
+  const timeOfDay = useGameStore(state => state.timeOfDay);
   const setGameStarted = useGameStore(state => state.setGameStarted);
+  const setTimeOfDay = useGameStore(state => state.setTimeOfDay);
   const presenter = usePresenter();
   const isMobile = presenter.isMobile;
 
@@ -32,6 +34,10 @@ export const UIOverlay: React.FC = () => {
   const handleEnterWorld = () => {
       setGameStarted(true);
       presenter.requestPointerLock();
+  };
+
+  const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      setTimeOfDay(parseFloat(e.target.value));
   };
 
   // --- ROBUST JOYSTICK LOGIC (Pointer Events) ---
@@ -104,6 +110,20 @@ export const UIOverlay: React.FC = () => {
   return (
     <div id="ui-layer" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', touchAction: 'none' }}>
       
+      {/* Time Control (Top Right) */}
+      <div style={{ position: 'absolute', top: 20, right: 20, pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+          <label style={{ color: 'white', fontWeight: 'bold', textShadow: '0 1px 2px black', marginBottom: 5 }}>Time of Day</label>
+          <input 
+            type="range" 
+            min="0" 
+            max="1" 
+            step="0.01" 
+            value={timeOfDay} 
+            onChange={handleTimeChange}
+            style={{ width: '150px' }}
+          />
+      </div>
+
       {/* Desktop Info - Collapsible */}
       {!isMobile && (
         <div 

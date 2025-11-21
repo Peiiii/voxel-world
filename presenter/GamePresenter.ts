@@ -20,6 +20,9 @@ export class GamePresenter {
     private raycaster = new THREE.Raycaster();
     private loopId: number = 0;
     
+    // Smoothing
+    private cameraYOffset = 0; // For visual smoothing when stepping up
+    
     public isMobile = false;
 
     public init = (container: HTMLElement) => {
@@ -88,6 +91,10 @@ export class GamePresenter {
         }
     }
 
+    public toggleFly = () => {
+        this.physics.flying = !this.physics.flying;
+    }
+
     // Public API for UI-driven Camera Control (Mobile)
     public rotateCamera = (dx: number, dy: number) => {
         const sensitivity = 0.005;
@@ -135,79 +142,100 @@ export class GamePresenter {
         const dt = Math.min((time - this.prevTime) / 1000, 0.1);
         this.prevTime = time;
 
-        const { setMiningProgress, setIsFlying } = useGameStore.getState();
+        const { setMiningProgress, setIsFlying, timeOfDay } = useGameStore.getState();
 
         if (this.physics.flying !== useGameStore.getState().isFlying) {
            setIsFlying(this.physics.flying);
         }
 
+        // Update Time
+        this.world.updateTimeOfDay(timeOfDay);
+
         // PASS input manager directly for analog support
         this.physics.step(dt, this.cameraYaw, this.input);
+
+        // --- SILKY SMOOTH STEPPING LOGIC ---
+        // If physics snapped up (stepped), we negate that snap in the camera logic
+        // and smoothly interpolate it back to 0 over time.
+        if (this.physics.lastStepDelta > 0) {
+            // If physics jumped up +1.05, set camera offset to -1.05 so visual position remains identical for this frame
+            this.cameraYOffset -= this.physics.lastStepDelta;
+        }
+        
+        // Decay offset to 0 (Rise visual). Lower speed = silkier feel.
+        this.cameraYOffset = THREE.MathUtils.lerp(this.cameraYOffset, 0, dt * 8); 
+
+        // Apply to World Camera Group
+        const smoothPos = this.physics.position.clone();
+        smoothPos.y += this.cameraYOffset;
+        
+        this.world.cameraYawGroup.position.copy(smoothPos);
+        
+        // ------------------------------------
 
         if (useGameStore.getState().isLocked) {
             // Update Raycaster
             this.raycaster.setFromCamera(new THREE.Vector2(0,0), this.world.camera);
-            this.raycaster.far = 8; 
-            const intersects = this.raycaster.intersectObjects(this.world.instancedMeshes);
+            this.raycaster.far = 6;
             
-            let found = false;
+            const intersects = this.raycaster.intersectObjects(this.world.instancedMeshes, false);
             if (intersects.length > 0) {
+                // Instance intersection returns instanceId
                 const hit = intersects[0];
-                if (hit.face) {
-                    const p = hit.point.clone().addScaledVector(hit.face.normal, -0.5);
-                    const block = this.world.getBlock(p.x, p.y, p.z);
-                    if (block) {
-                        found = true;
-                        const bx = Math.round(p.x);
-                        const by = Math.round(p.y);
-                        const bz = Math.round(p.z);
-                        
-                        this.world.setSelection(bx, by, bz, true);
+                const mesh = hit.object as THREE.InstancedMesh;
+                const instanceId = hit.instanceId;
+                
+                if (instanceId !== undefined) {
+                     // We need to find the exact block key. 
+                     // We can reverse lookup via matrix position?
+                     const mat = new THREE.Matrix4();
+                     mesh.getMatrixAt(instanceId, mat);
+                     const pos = new THREE.Vector3().setFromMatrixPosition(mat);
+                     
+                     // Snap to grid
+                     const x = Math.round(pos.x);
+                     const y = Math.round(pos.y);
+                     const z = Math.round(pos.z);
+                     
+                     this.world.setSelection(x, y, z, true);
+                     this.targetBlock = { x, y, z };
 
-                        if (!this.targetBlock || this.targetBlock.x !== bx || this.targetBlock.y !== by || this.targetBlock.z !== bz) {
-                            this.targetBlock = { x: bx, y: by, z: bz, type: block.type };
-                            this.mineStartTime = time;
-                            setMiningProgress(0);
-                        }
-                        
-                        if (this.isMining) {
-                            const hardness = HARDNESS[block.type] || 1000;
-                            const progress = Math.min((time - this.mineStartTime) / hardness, 1);
-                            setMiningProgress(progress);
-                            
-                            if (progress >= 1) {
-                                const removed = this.world.removeBlock(this.targetBlock.x, this.targetBlock.y, this.targetBlock.z);
-                                if (removed && this.world.particles) {
-                                    this.world.particles.emit(new THREE.Vector3(this.targetBlock.x, this.targetBlock.y, this.targetBlock.z), PALETTE[removed], 25);
-                                }
-                                this.isMining = false;
-                                setMiningProgress(0);
-                            }
-                        } else {
-                            setMiningProgress(0);
-                            this.mineStartTime = time; // Reset start time if not mining but looking
-                        }
-                    }
+                     if (this.isMining) {
+                         const block = this.world.getBlock(x, y, z);
+                         if (block) {
+                             const hardness = HARDNESS[block.type] || 500;
+                             const elapsed = performance.now() - this.mineStartTime;
+                             const progress = Math.min(elapsed / hardness, 1);
+                             setMiningProgress(progress);
+                             
+                             this.world.setPlayerMining(true);
+
+                             if (progress >= 1) {
+                                 this.world.removeBlock(x, y, z);
+                                 
+                                 // Particles
+                                 const color = PALETTE[block.type] || 0xffffff;
+                                 this.world.particles?.emit(new THREE.Vector3(x, y, z), color);
+
+                                 this.mineStartTime = performance.now();
+                                 setMiningProgress(0);
+                             }
+                         }
+                     } else {
+                         setMiningProgress(0);
+                         this.world.setPlayerMining(false);
+                     }
                 }
-            }
-            if (!found) {
+            } else {
+                this.world.setSelection(0, 0, 0, false);
                 this.targetBlock = null;
                 setMiningProgress(0);
-                this.world.setSelection(0, 0, 0, false);
+                this.world.setPlayerMining(false);
             }
-            
-            this.world.setPlayerMining(this.isMining);
+        } else {
+            this.world.setPlayerMining(false);
         }
 
         this.world.render(dt, this.cameraYaw, this.cameraPitch, this.physics.position, this.physics.velocity, this.physics.flying);
-    }
-
-    public toggleFly = () => {
-        this.physics.flying = !this.physics.flying;
-        if (this.physics.flying) {
-            this.physics.velocity.y = 2.0;
-            this.physics.onGround = false;
-        }
-        useGameStore.getState().setIsFlying(this.physics.flying);
     }
 }

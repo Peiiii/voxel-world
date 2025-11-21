@@ -30,14 +30,15 @@ export class WorldManager {
     public instancedMeshes: THREE.InstancedMesh[] = [];
     public spawnPoint = new THREE.Vector3(0, 100, 0); 
 
-    private cameraRaycaster = new THREE.Raycaster();
     private dirLight: THREE.DirectionalLight;
+    private ambientLight: THREE.AmbientLight;
+    private sunMesh: THREE.Mesh;
+    private skyColor = new THREE.Color(0x87CEEB);
 
     constructor() {
         this.scene = new THREE.Scene();
-        const skyColor = 0x87CEEB;
-        this.scene.background = new THREE.Color(skyColor);
-        this.scene.fog = new THREE.Fog(skyColor, 60, 180); 
+        this.scene.background = this.skyColor;
+        this.scene.fog = new THREE.Fog(this.skyColor, 60, 180); 
 
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300);
         
@@ -55,8 +56,8 @@ export class WorldManager {
         this.cameraPitchGroup.add(this.camera);
         this.camera.position.set(1.2, 0, 4);
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-        this.scene.add(ambientLight);
+        this.ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        this.scene.add(this.ambientLight);
         
         this.dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
         this.dirLight.position.set(100, 150, 100);
@@ -67,11 +68,9 @@ export class WorldManager {
         const sunSize = 30;
         const sunGeo = new THREE.BoxGeometry(sunSize, sunSize, sunSize);
         const sunMat = new THREE.MeshBasicMaterial({ color: 0xffe34d, fog: false });
-        const sunMesh = new THREE.Mesh(sunGeo, sunMat);
-        sunMesh.position.set(100, 120, -150); 
-        sunMesh.rotation.z = Math.PI / 4;
-        sunMesh.rotation.y = Math.PI / 4;
-        this.scene.add(sunMesh);
+        this.sunMesh = new THREE.Mesh(sunGeo, sunMat);
+        this.sunMesh.position.set(100, 120, -150); 
+        this.scene.add(this.sunMesh);
     }
 
     public init = (container: HTMLElement, isMobile: boolean) => {
@@ -86,7 +85,7 @@ export class WorldManager {
             const sSize = 60;
             this.dirLight.shadow.camera.left = -sSize; this.dirLight.shadow.camera.right = sSize;
             this.dirLight.shadow.camera.top = sSize; this.dirLight.shadow.camera.bottom = -sSize;
-            this.scene.fog = new THREE.Fog(0x87CEEB, 40, 120);
+            this.scene.fog = new THREE.Fog(this.skyColor, 40, 120);
         } else {
             this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
             this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -178,7 +177,6 @@ export class WorldManager {
                 const distFromCenter = Math.sqrt(x*x + z*z);
 
                 // 1. SAFE SPAWN PLATEAU
-                // Force a flat solid area at (0,0) so player doesn't sink
                 if (distFromCenter < 15) {
                     const spawnH = 18;
                     for (let y = spawnH; y > spawnH - 10; y--) {
@@ -187,7 +185,6 @@ export class WorldManager {
                         else if (y < spawnH - 3) t = BlockType.STONE;
                         storeBlock(t, x, y, z);
                     }
-                    // Set player spawn point just above
                     if (Math.abs(x) < 2 && Math.abs(z) < 2) {
                         this.spawnPoint.set(0, spawnH + 3, 0);
                     }
@@ -199,8 +196,12 @@ export class WorldManager {
                 let surface = BlockType.GRASS;
                 let sub = BlockType.DIRT;
                 
-                const isMountain = (z < -45 && z > -85 && x > -40 && x < 40); 
-                const isDesert = (z > 45 && z < 85 && x > -35 && x < 35); 
+                // Mountain: North (-Z)
+                const isMountain = (z < -45 && z > -95 && x > -50 && x < 50); 
+                
+                // Ladder Zone: South (+Z). Aggressively lower terrain here.
+                const isLadderZone = (z > 40 && Math.abs(x) < 40);
+                
                 const isOcean = distFromCenter > (isMobile ? 80 : 105);
 
                 h += heightNoise.noise(x*0.05, 0, z*0.05) * 4;
@@ -210,32 +211,30 @@ export class WorldManager {
                     surface = BlockType.SAND;
                     sub = BlockType.SAND;
                 } else if (isMountain) {
-                    const dx = x - 0; const dz = z - (-65); 
+                    const dx = x - 0; const dz = z - (-70); 
                     const d = Math.sqrt(dx*dx + dz*dz);
-                    if (d < 35) {
-                        const factor = (35 - d) / 35; 
+                    if (d < 40) {
+                        const factor = (40 - d) / 40; 
                         const mNoise = Math.abs(detailNoise.noise(x*0.1, 0, z*0.1));
-                        h += factor * 85 * (0.6 + mNoise); 
+                        h += factor * 95 * (0.6 + mNoise); 
                         surface = BlockType.STONE;
                         sub = BlockType.STONE;
-                        if (h > 50) surface = BlockType.SNOW;
+                        if (h > 55) surface = BlockType.SNOW;
                     }
-                } else if (isDesert) {
-                    h += Math.sin(x*0.2) * Math.sin(z*0.2 + x*0.1) * 5;
-                    surface = BlockType.SAND;
-                    sub = BlockType.SANDSTONE;
+                } else if (isLadderZone) {
+                    // Force flat, low terrain to keep ladder entrance clear
+                    h = 10; 
+                    surface = BlockType.GRASS;
                 }
 
                 h = Math.round(h);
-                if (h < 5) h = 5; // Bedrock floor
+                if (h < 5) h = 5; 
 
                 // 2. SOLID TERRAIN
-                // Fill downwards 8 blocks to ensure mountains are not hollow shells
-                // and you can't fall through easily.
                 for (let y = h; y > h - 8; y--) {
                     let type = sub;
                     if (y === h) type = surface;
-                    if (y < h - 4) type = BlockType.STONE; // Core is stone
+                    if (y < h - 4) type = BlockType.STONE;
                     storeBlock(type, x, y, z);
                 }
 
@@ -247,7 +246,7 @@ export class WorldManager {
                 }
 
                 // Flora
-                if (h > WATER_LEVEL && !isDesert && !isMountain && !isOcean && Math.random() > 0.98) {
+                if (h > WATER_LEVEL && !isMountain && !isOcean && !isLadderZone && Math.random() > 0.98) {
                      storeBlock(BlockType.WOOD, x, h+1, z);
                      storeBlock(BlockType.WOOD, x, h+2, z);
                      storeBlock(BlockType.LEAVES, x, h+3, z);
@@ -259,9 +258,14 @@ export class WorldManager {
             }
         }
 
-        // 3. MEGA SPIRE CATHEDRAL
-        // A massive procedural tower at specific coords
-        this.generateMegaSpire(worldData, -50, 50);
+        // 3. MEGA SPIRE (West, -X)
+        this.generateMegaSpire(worldData, -80, 0);
+
+        // 4. SKY LADDER (South, +Z)
+        this.generateSkyLadder(worldData, 0, 60); 
+
+        // 5. VOXEL WORLD TITLE (East, +X)
+        this.generateVoxelTitle(worldData, 120, 0); 
 
         // --- INSTANCING & MOBS ---
         const chunks = new Map<string, { count: number, matrices: THREE.Matrix4[] }>();
@@ -270,12 +274,11 @@ export class WorldManager {
             if (!chunks.has(type)) chunks.set(type, { count: 0, matrices: [] });
             const entry = chunks.get(type)!;
             
-            // Reverse key
             const y = key & 0xFF;
             const z = ((key >> 8) & 0xFF) - 128;
             const x = ((key >> 16) & 0xFF) - 128;
             
-            const mat = new THREE.Matrix4().makeTranslation(x, y - 64, z); // Adjust y offset from key
+            const mat = new THREE.Matrix4().makeTranslation(x, y - 64, z);
             entry.matrices.push(mat);
             entry.count++;
         });
@@ -288,8 +291,6 @@ export class WorldManager {
                 mesh.setMatrixAt(i, data.matrices[i]);
                 const pos = new THREE.Vector3();
                 pos.setFromMatrixPosition(data.matrices[i]);
-                
-                // Store for interactions
                 const key = getKey(Math.round(pos.x), Math.round(pos.y), Math.round(pos.z));
                 this.blocks.set(key, { type, instanceId: i, mesh });
             }
@@ -297,8 +298,7 @@ export class WorldManager {
             this.instancedMeshes.push(mesh);
         });
 
-        // 4. MOBS: DINOSAURS & HUMANS
-        // Spawn based on simplified biome logic
+        // 5. MOBS
         for (let i = 0; i < (isMobile ? 10 : 20); i++) {
             const angle = Math.random() * Math.PI * 2;
             const dist = 20 + Math.random() * 60;
@@ -308,16 +308,8 @@ export class WorldManager {
 
             if (my > WATER_LEVEL) {
                 let mobType: 'human' | 'dino' | 'sheep' = 'sheep';
-                
-                // Humans near spawn/center
-                if (dist < 40) {
-                    mobType = 'human';
-                } 
-                // Dinosaurs further out, especially in mountains or plains
-                else if (Math.random() > 0.5) {
-                    mobType = 'dino';
-                }
-
+                if (dist < 40) mobType = 'human';
+                else if (Math.random() > 0.5) mobType = 'dino';
                 const mob = new Mob(mobType, mx, my + 1, mz);
                 this.scene.add(mob.mesh);
                 this.mobs.push(mob);
@@ -325,42 +317,118 @@ export class WorldManager {
         }
     }
 
+    private generateSkyLadder(worldData: Map<number, string>, cx: number, cz: number) {
+        // Straight, wide, infinite ladder going South (+Z)
+        const maxY = 4000; 
+        const startY = 12; // Start near ground
+        
+        // Width of the stairs
+        const width = 3; 
+        const totalClearWidth = width + 3;
+
+        for (let i = 0; i < (maxY - startY); i++) {
+            const y = startY + i;
+            const z = cz + i; // 1:1 slope forward
+            
+            // CLEAR AREA: Aggressively remove blocks above and around the step
+            // This creates a clean tunnel through any mountains or clouds
+            for (let airY = 0; airY < 10; airY++) { // 10 blocks high clearance
+                for (let w = -totalClearWidth; w <= totalClearWidth; w++) {
+                    // Do not remove the block we are about to place (airY=0, within width)
+                    if (airY === 0 && Math.abs(w) <= width) continue;
+                    
+                    const key = getKey(cx + w, y + airY, z);
+                    if (worldData.has(key)) worldData.delete(key);
+                }
+            }
+
+            // Build Step
+            for (let w = -width; w <= width; w++) {
+                const x = cx + w;
+                let type = BlockType.SNOW;
+                // Gold trim on the sides and every 50th step
+                if (Math.abs(w) === width || i % 50 === 0) {
+                    type = BlockType.GOLD; 
+                }
+                this.storeBlockMap(worldData, type, x, y, z);
+                
+                // Fill underneath slightly to look solid
+                this.storeBlockMap(worldData, BlockType.SNOW, x, y - 1, z);
+                this.storeBlockMap(worldData, BlockType.SNOW, x, y - 2, z);
+            }
+        }
+    }
+
+    private generateVoxelTitle(worldData: Map<number, string>, cx: number, cz: number) {
+        const letters: {[key: string]: string[]} = {
+            V: ["10001", "10001", "10001", "01010", "00100"],
+            O: ["01110", "10001", "10001", "10001", "01110"],
+            X: ["10001", "01010", "00100", "01010", "10001"],
+            E: ["11111", "10000", "11110", "10000", "11111"],
+            L: ["10000", "10000", "10000", "10000", "11111"],
+            W: ["10001", "10001", "10101", "11011", "10001"],
+            R: ["11110", "10001", "11110", "10100", "10011"],
+            D: ["11110", "10001", "10001", "10001", "11110"],
+            SPC: ["00000", "00000", "00000", "00000", "00000"]
+        };
+        
+        const text = "VOXEL WORLD";
+        const scale = 3; // Larger
+        const startY = 80; // High up
+        
+        // Calculate total width to center it along Z
+        const totalWidth = text.length * 6 * scale;
+        let currentZ = cz - totalWidth / 2; 
+
+        for (let char of text) {
+            const pattern = char === ' ' ? letters['SPC'] : letters[char];
+            if (pattern) {
+                for (let row = 0; row < 5; row++) {
+                    for (let col = 0; col < 5; col++) {
+                        if (pattern[row][col] === '1') {
+                            const pixelY = (4 - row);
+                            for(let sy=0; sy<scale; sy++) {
+                                for(let sz=0; sz<scale; sz++) {
+                                    const bx = cx; // Flat on X plane
+                                    const by = Math.floor(startY + (pixelY * scale) + sy);
+                                    const bz = Math.floor(currentZ + (col * scale) + sz);
+                                    for(let d=0; d<2; d++) {
+                                        this.storeBlockMap(worldData, BlockType.NEON_CYAN, bx + d, by, bz);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                currentZ += 6 * scale; 
+            }
+        }
+    }
+
     private generateMegaSpire(worldData: Map<number, string>, cx: number, cz: number) {
         const height = 90;
         const baseRadius = 18;
-        
-        // Loop height
         for (let y = 0; y < height; y++) {
-            // Tapering radius logic
             let currentRadius = baseRadius * (1 - (y / height) * 0.8);
-            // Flaring at top for spire effect
             if (y > height - 15) currentRadius = 2; 
             if (y > height - 5) currentRadius = 1;
-
             for (let x = -Math.ceil(currentRadius); x <= Math.ceil(currentRadius); x++) {
                 for (let z = -Math.ceil(currentRadius); z <= Math.ceil(currentRadius); z++) {
                     const d2 = x*x + z*z;
-                    // Star shape buttresses
                     const angle = Math.atan2(z, x);
-                    const spikes = Math.cos(angle * 4) * 3; // 4 buttresses
+                    const spikes = Math.cos(angle * 4) * 3; 
                     const rCheck = currentRadius + (y < 30 ? spikes : 0);
-
                     if (d2 < rCheck*rCheck) {
-                        const py = 15 + y; // Start at ground level ~15
-                        // Hollow inside check
+                        const py = 15 + y; 
                         if (d2 > (rCheck - 2)*(rCheck - 2) || y > height - 20) {
-                            // Walls
                             let type = BlockType.STONE;
                             if (y % 10 === 0) type = BlockType.OBSIDIAN;
                             if (y > height - 10) type = BlockType.GOLD;
-                            
                             this.storeBlockMap(worldData, type, cx + x, py, cz + z);
                         } else if (y === 0 || y === 30 || y === 60) {
-                            // Floors
                             this.storeBlockMap(worldData, BlockType.PLANKS, cx + x, py, cz + z);
                         } else if (x === 0 && z === 0) {
-                            // Central pillar/stairs
-                            this.storeBlockMap(worldData, BlockType.LOG, cx + x, py, cz + z);
+                            this.storeBlockMap(worldData, BlockType.WOOD, cx + x, py, cz + z);
                         }
                     }
                 }
@@ -380,11 +448,80 @@ export class WorldManager {
         return 0;
     }
 
+    public updateTimeOfDay(time: number) {
+        // time: 0..1. 0.5 = Noon, 0/1 = Midnight.
+        
+        // Sun Rotation
+        const angle = time * Math.PI * 2 - Math.PI / 2;
+        const radius = 200;
+        const sx = Math.cos(angle) * radius;
+        const sy = Math.sin(angle) * radius;
+        
+        this.dirLight.position.set(sx, sy, 50);
+        this.sunMesh.position.set(sx, sy, -150);
+        
+        // Colors
+        // Noon
+        const dayColor = new THREE.Color(0x87CEEB);
+        const sunsetColor = new THREE.Color(0xFD5E53);
+        const nightColor = new THREE.Color(0x050510);
+
+        let currentColor = dayColor.clone();
+        let intensity = 1.1;
+        let ambient = 0.7;
+
+        if (time < 0.2 || time > 0.8) {
+            // Night
+            currentColor.copy(nightColor);
+            intensity = 0.0;
+            ambient = 0.2;
+        } else if (time < 0.3) {
+            // Sunrise (0.2 - 0.3)
+            const t = (time - 0.2) * 10;
+            currentColor.lerpColors(nightColor, sunsetColor, t);
+            intensity = t * 0.5;
+            ambient = 0.2 + t * 0.3;
+        } else if (time < 0.4) {
+             // Morning (0.3 - 0.4)
+             const t = (time - 0.3) * 10;
+             currentColor.lerpColors(sunsetColor, dayColor, t);
+             intensity = 0.5 + t * 0.6;
+             ambient = 0.5 + t * 0.2;
+        } else if (time > 0.7) {
+            // Sunset (0.7 - 0.8)
+            const t = (time - 0.7) * 10;
+            currentColor.lerpColors(dayColor, sunsetColor, t);
+            intensity = 1.1 - t * 0.6;
+            ambient = 0.7 - t * 0.4;
+        } else {
+            // Day (0.4 - 0.7)
+            currentColor.copy(dayColor);
+        }
+        
+        // Fade sunset to night
+        if (time > 0.75) {
+             const t = (time - 0.75) * 20; 
+             if (t <= 1) currentColor.lerpColors(sunsetColor, nightColor, t);
+             else currentColor.copy(nightColor);
+        }
+
+        this.scene.background = currentColor;
+        if (this.scene.fog) this.scene.fog.color = currentColor;
+        
+        this.dirLight.intensity = intensity;
+        this.ambientLight.intensity = ambient;
+    }
+
     public render = (dt: number, yaw: number, pitch: number, pPos: THREE.Vector3, pVel: THREE.Vector3, isFlying: boolean) => {
-        this.cameraYawGroup.position.copy(pPos);
+        // Camera Group now handles orientation. 
+        // pPos is the PHYSICS body position. 
+        // We will manipulate the group's position before rendering to add smoothing.
+        
         this.cameraYawGroup.rotation.y = yaw;
         this.cameraPitchGroup.rotation.x = pitch;
-
+        
+        // Important: The position is set by GamePresenter now to include smoothing logic.
+        // But we still need to update the player actor visualization
         this.playerActor?.setPosition(pPos);
         this.playerActor?.setRotation(yaw);
         this.playerActor?.update(dt, new THREE.Vector2(pVel.x, pVel.z).length(), isFlying);

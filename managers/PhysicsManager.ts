@@ -8,6 +8,7 @@ export class PhysicsManager {
   public velocity = new THREE.Vector3();
   public flying = false;
   public onGround = false;
+  public lastStepDelta = 0; // Tracks sudden Y changes for visual smoothing
   
   private world: WorldManager | null = null;
   private playerHeight = 1.7; 
@@ -63,19 +64,15 @@ export class PhysicsManager {
   }
 
   public step = (dt: number, yaw: number, inputMgr: InputManager) => {
+    this.lastStepDelta = 0; // Reset step tracker at the beginning of the frame
     const input = inputMgr.getMovementInput();
     
     // Input vector (Analog x, z)
-    // In Physics: Forward is -Z, Right is +X.
-    // Input x is Right (+), z is Backward (+).
-    // So we map input.x -> x, input.z -> z directly (since InputManager returns z as backward/forward axis)
     const inputVec = new THREE.Vector3(input.x, 0, input.z);
     inputVec.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
 
-    // Physics constants
     const moveSpeed = this.flying ? 25 : 6;
     
-    // Movement Logic
     if (this.flying) {
         const lerpFactor = dt * 10;
         this.velocity.x = THREE.MathUtils.lerp(this.velocity.x, inputVec.x * moveSpeed, lerpFactor);
@@ -90,6 +87,7 @@ export class PhysicsManager {
                 this.velocity.x = inputVec.x * moveSpeed;
                 this.velocity.z = inputVec.z * moveSpeed;
             } else {
+                // Ground Friction
                 const damping = Math.pow(0.0001, dt); 
                 this.velocity.x *= damping;
                 this.velocity.z *= damping;
@@ -101,6 +99,7 @@ export class PhysicsManager {
             this.velocity.x += inputVec.x * airAccel * dt;
             this.velocity.z += inputVec.z * airAccel * dt;
             
+            // Air Drag
             const airDrag = Math.pow(0.9, dt * 60); 
             this.velocity.x *= airDrag;
             this.velocity.z *= airDrag;
@@ -109,7 +108,6 @@ export class PhysicsManager {
         // Gravity
         this.velocity.y -= 32 * dt;
 
-        // Jump Logic
         const wasOnGround = this.onGround;
         this.onGround = false; 
 
@@ -128,7 +126,7 @@ export class PhysicsManager {
     }
 
     // Physics Sub-stepping
-    const steps = 8; 
+    const steps = 5; 
     const subDt = dt / steps;
 
     for (let s = 0; s < steps; s++) {
@@ -147,16 +145,26 @@ export class PhysicsManager {
     // X Movement
     pos.x += this.velocity.x * dt;
     if (this.testCollision(pos)) {
+        let stepped = false;
         if (this.onGround && !this.flying) {
-            const stepCandidate = pos.clone();
-            stepCandidate.y += 1.1; 
-            if (!this.testCollision(stepCandidate)) {
+            const stepCheck = pos.clone();
+            // Check 1.1m up (slightly more than 1 block) to see if we can step up
+            stepCheck.y += 1.1; 
+            if (!this.testCollision(stepCheck)) {
+                // Successful Step Up
+                const riseAmount = 1.05; // Just enough to clear the 1.0 block
+                this.position.y += riseAmount; 
+                this.lastStepDelta += riseAmount; // Record this for visual smoothing
+                
+                // Important: Maintain Ground State
+                this.onGround = true; 
+                this.velocity.y = 0; 
                 this.position.x = pos.x;
-                this.position.y = Math.floor(this.position.y) + 1 + 0.001;
-            } else {
-                 this.velocity.x = 0; 
+                stepped = true;
             }
-        } else {
+        }
+        if (!stepped) {
+             this.position.x = pos.x - this.velocity.x * dt; 
              this.velocity.x = 0;
         }
     } else {
@@ -167,17 +175,24 @@ export class PhysicsManager {
     pos.copy(this.position);
     pos.z += this.velocity.z * dt;
     if (this.testCollision(pos)) {
+         let stepped = false;
          if (this.onGround && !this.flying) {
-            const stepCandidate = pos.clone();
-            stepCandidate.y += 1.1; 
-            if (!this.testCollision(stepCandidate)) {
+            const stepCheck = pos.clone();
+            stepCheck.y += 1.1; 
+            if (!this.testCollision(stepCheck)) {
+                const riseAmount = 1.05;
+                this.position.y += riseAmount;
+                this.lastStepDelta += riseAmount;
+
+                this.onGround = true;
+                this.velocity.y = 0;
                 this.position.z = pos.z;
-                this.position.y = Math.floor(this.position.y) + 1 + 0.001;
-            } else {
-                 this.velocity.z = 0;
+                stepped = true;
             }
-        } else {
-             this.velocity.z = 0;
+        }
+        if (!stepped) {
+            this.position.z = pos.z - this.velocity.z * dt;
+            this.velocity.z = 0;
         }
     } else {
         this.position.z = pos.z;
@@ -191,6 +206,7 @@ export class PhysicsManager {
          if (this.velocity.y < 0) {
              this.onGround = true;
              this.velocity.y = 0;
+             // Snap nicely to integer grid + epsilon if landing on top
              this.position.y = Math.round(pos.y - this.playerHeight/2) + 0.5 + 0.0001;
          } else if (this.velocity.y > 0) {
              this.velocity.y = 0;
