@@ -1,5 +1,5 @@
 
-export const WORLD_SIZE = 160; 
+export const WORLD_SIZE = 240; 
 export const CHUNK_SIZE = 32;
 export const WATER_LEVEL = 11; // Slight raise to accommodate new terrain scale
 
@@ -43,7 +43,8 @@ export const BlockType = {
   // Biome Expansion
   LAVA: 'lava',
   BASALT: 'basalt',
-  ICE: 'ice'
+  ICE: 'ice',
+  GOLD: 'gold'
 };
 
 export const PALETTE = {
@@ -85,7 +86,8 @@ export const PALETTE = {
   // New Colors
   [BlockType.LAVA]: 0xCF1020,
   [BlockType.BASALT]: 0x2D2D2D,
-  [BlockType.ICE]: 0xA5F2F3
+  [BlockType.ICE]: 0xA5F2F3,
+  [BlockType.GOLD]: 0xFFD700
 };
 
 export const HARDNESS: Record<string, number> = {
@@ -122,7 +124,8 @@ export const HARDNESS: Record<string, number> = {
     [BlockType.FARMLAND]: 600,
     [BlockType.WHEAT]: 100,
     [BlockType.BASALT]: 3000,
-    [BlockType.ICE]: 500
+    [BlockType.ICE]: 500,
+    [BlockType.GOLD]: 3000
 };
 
 // --- PERLIN NOISE ---
