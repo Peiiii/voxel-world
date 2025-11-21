@@ -9,7 +9,7 @@ export class InputManager {
     shift: false
   };
 
-  // Virtual Joystick State
+  // Virtual Joystick State (Analog)
   private virtualMove = { x: 0, y: 0 };
 
   public init = () => {
@@ -26,20 +26,44 @@ export class InputManager {
   public setVirtualMove = (x: number, y: number) => {
       this.virtualMove.x = x;
       this.virtualMove.y = y;
-      this.updateKeysFromVirtual();
   }
 
   public setButton = (btn: 'jump' | 'shift', pressed: boolean) => {
       this.keys[btn] = pressed;
   }
 
-  private updateKeysFromVirtual = () => {
-      // Threshold to prevent drift
-      const threshold = 0.2;
-      this.keys.f = this.virtualMove.y < -threshold;
-      this.keys.b = this.virtualMove.y > threshold;
-      this.keys.l = this.virtualMove.x < -threshold;
-      this.keys.r = this.virtualMove.x > threshold;
+  // Combine Keyboard (Digital) and Joystick (Analog)
+  public getMovementInput = () => {
+      let x = 0;
+      let z = 0;
+
+      // Keyboard
+      if (this.keys.l) x -= 1;
+      if (this.keys.r) x += 1;
+      if (this.keys.f) z -= 1;
+      if (this.keys.b) z += 1;
+
+      // Joystick overrides if active
+      if (Math.abs(this.virtualMove.x) > 0.01 || Math.abs(this.virtualMove.y) > 0.01) {
+          // If keyboard is also pressed, we could add them, but usually mobile users just use joystick.
+          // We'll let joystick take precedence for smoothness if it's being used.
+          x = this.virtualMove.x;
+          z = this.virtualMove.y;
+      }
+      
+      // Clamp magnitude to 1
+      const len = Math.sqrt(x*x + z*z);
+      if (len > 1) {
+          x /= len;
+          z /= len;
+      }
+
+      return {
+          x,
+          z,
+          jump: this.keys.jump,
+          shift: this.keys.shift
+      };
   }
 
   private onKeyDown = (e: KeyboardEvent) => {

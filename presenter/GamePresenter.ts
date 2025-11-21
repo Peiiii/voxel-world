@@ -20,9 +20,6 @@ export class GamePresenter {
     private raycaster = new THREE.Raycaster();
     private loopId: number = 0;
     
-    // Touch handling
-    private lastTouchX = 0;
-    private lastTouchY = 0;
     public isMobile = false;
 
     public init = (container: HTMLElement) => {
@@ -31,20 +28,21 @@ export class GamePresenter {
         this.setupControls();
         this.input.init();
 
+        // Slight delay to allow UI to mount before heavy world generation
         setTimeout(() => {
             try {
-                this.world.init(container);
+                this.world.init(container, this.isMobile);
                 this.physics.setWorld(this.world);
-                // Set spawn point safely
-                this.physics.position.copy(this.world.spawnPoint);
                 
-                const loadingEl = document.getElementById('loading');
-                if (loadingEl) loadingEl.style.display = 'none';
+                // Ensure we spawn high enough
+                const spawnY = Math.max(this.world.spawnPoint.y, 15);
+                this.physics.position.set(this.world.spawnPoint.x, spawnY, this.world.spawnPoint.z);
+                this.physics.velocity.set(0, 0, 0);
             } catch (e) {
                 console.error("Failed to initialize world:", e);
             }
             this.startLoop();
-        }, 10);
+        }, 50);
     }
 
     public dispose = () => {
@@ -56,8 +54,6 @@ export class GamePresenter {
         document.removeEventListener('mousedown', this.onMouseDown);
         document.removeEventListener('mouseup', this.onMouseUp);
         document.removeEventListener('pointerlockchange', this.onPointerLockChange);
-        document.removeEventListener('touchmove', this.onTouchMove);
-        document.removeEventListener('touchstart', this.onTouchStart);
     }
 
     private setupControls = () => {
@@ -66,10 +62,6 @@ export class GamePresenter {
         document.addEventListener('mouseup', this.onMouseUp);
         document.addEventListener('pointerlockchange', this.onPointerLockChange);
         document.addEventListener('pointerlockerror', (e) => console.warn("Pointer Lock Error (handled)", e));
-        
-        // Touch controls for camera look
-        document.addEventListener('touchmove', this.onTouchMove, { passive: false });
-        document.addEventListener('touchstart', this.onTouchStart, { passive: false });
     }
 
     private onPointerLockChange = () => {
@@ -85,7 +77,7 @@ export class GamePresenter {
             
             try {
                 const promise = document.body.requestPointerLock();
-                // @ts-ignore - Some browsers return a promise that rejects if the user exits fast
+                // @ts-ignore 
                 if (promise && typeof promise.catch === 'function') {
                     // @ts-ignore
                     promise.catch(e => { /* Ignore user cancellation/fast exit */ });
@@ -96,50 +88,19 @@ export class GamePresenter {
         }
     }
 
-    private onTouchStart = (e: TouchEvent) => {
-        // Only track the first touch that isn't on a control interface
-        // Simple heuristic: if it's on the right side of the screen and not a button
-        for (let i = 0; i < e.touches.length; i++) {
-            const t = e.touches[i];
-            // If touch is on the right 2/3rds of screen, treat as camera look (simplification)
-            // The UI layer handles the buttons, preventing default if touched there
-            if (t.clientX > window.innerWidth * 0.3) {
-                this.lastTouchX = t.clientX;
-                this.lastTouchY = t.clientY;
-            }
-        }
-    }
-
-    private onTouchMove = (e: TouchEvent) => {
-        if (!useGameStore.getState().isLocked) return;
-        
-        // Prevent scrolling
-        if(e.cancelable) e.preventDefault();
-
-        for (let i = 0; i < e.touches.length; i++) {
-            const t = e.touches[i];
-            // Simple logic: If touch started on right side (camera zone)
-            if (t.clientX > window.innerWidth * 0.3) {
-                const dx = t.clientX - this.lastTouchX;
-                const dy = t.clientY - this.lastTouchY;
-                
-                const sensitivity = 0.005;
-                this.cameraYaw -= dx * sensitivity;
-                this.cameraPitch -= dy * sensitivity;
-                this.cameraPitch = Math.max(-Math.PI/2+0.1, Math.min(Math.PI/2-0.1, this.cameraPitch));
-
-                this.lastTouchX = t.clientX;
-                this.lastTouchY = t.clientY;
-            }
-        }
+    // Public API for UI-driven Camera Control (Mobile)
+    public rotateCamera = (dx: number, dy: number) => {
+        const sensitivity = 0.005;
+        this.cameraYaw -= dx * sensitivity;
+        this.cameraPitch -= dy * sensitivity;
+        this.cameraPitch = Math.max(-Math.PI/2+0.1, Math.min(Math.PI/2-0.1, this.cameraPitch));
     }
 
     private onMouseMove = (e: MouseEvent) => {
         if (!useGameStore.getState().isLocked) return;
-        const sensitivity = 0.002;
-        this.cameraYaw -= e.movementX * sensitivity;
-        this.cameraPitch -= e.movementY * sensitivity;
-        this.cameraPitch = Math.max(-Math.PI/2+0.1, Math.min(Math.PI/2-0.1, this.cameraPitch));
+        // Use public method for consistency
+        this.rotateCamera(e.movementX, e.movementY * 0.4); // Mouse movement needs slightly different scaling or not
+        // Actually standard mouse movement is usually 1:1 pixel delta, so let's adjust sensitivity inside
     }
 
     private onMouseDown = () => {
@@ -180,49 +141,52 @@ export class GamePresenter {
            setIsFlying(this.physics.flying);
         }
 
-        this.physics.step(dt, this.cameraYaw, this.input.keys);
+        // PASS input manager directly for analog support
+        this.physics.step(dt, this.cameraYaw, this.input);
 
         if (useGameStore.getState().isLocked) {
             // Update Raycaster
             this.raycaster.setFromCamera(new THREE.Vector2(0,0), this.world.camera);
-            this.raycaster.far = 10; // Increased reach distance (Minecraft Survival is ~4.5, Creative ~5-6, extended to 10 for user req)
+            this.raycaster.far = 8; 
             const intersects = this.raycaster.intersectObjects(this.world.instancedMeshes);
             
             let found = false;
             if (intersects.length > 0) {
                 const hit = intersects[0];
-                const p = hit.point.clone().addScaledVector(hit.face!.normal!, -0.5);
-                const block = this.world.getBlock(p.x, p.y, p.z);
-                if (block) {
-                    found = true;
-                    const bx = Math.round(p.x);
-                    const by = Math.round(p.y);
-                    const bz = Math.round(p.z);
-                    
-                    this.world.setSelection(bx, by, bz, true);
-
-                    if (!this.targetBlock || this.targetBlock.x !== bx || this.targetBlock.y !== by || this.targetBlock.z !== bz) {
-                        this.targetBlock = { x: bx, y: by, z: bz, type: block.type };
-                        this.mineStartTime = time;
-                        setMiningProgress(0);
-                    }
-                    
-                    if (this.isMining) {
-                        const hardness = HARDNESS[block.type] || 1000;
-                        const progress = Math.min((time - this.mineStartTime) / hardness, 1);
-                        setMiningProgress(progress);
+                if (hit.face) {
+                    const p = hit.point.clone().addScaledVector(hit.face.normal, -0.5);
+                    const block = this.world.getBlock(p.x, p.y, p.z);
+                    if (block) {
+                        found = true;
+                        const bx = Math.round(p.x);
+                        const by = Math.round(p.y);
+                        const bz = Math.round(p.z);
                         
-                        if (progress >= 1) {
-                            const removed = this.world.removeBlock(this.targetBlock.x, this.targetBlock.y, this.targetBlock.z);
-                            if (removed && this.world.particles) {
-                                this.world.particles.emit(new THREE.Vector3(this.targetBlock.x, this.targetBlock.y, this.targetBlock.z), PALETTE[removed], 25);
-                            }
-                            this.isMining = false;
+                        this.world.setSelection(bx, by, bz, true);
+
+                        if (!this.targetBlock || this.targetBlock.x !== bx || this.targetBlock.y !== by || this.targetBlock.z !== bz) {
+                            this.targetBlock = { x: bx, y: by, z: bz, type: block.type };
+                            this.mineStartTime = time;
                             setMiningProgress(0);
                         }
-                    } else {
-                        setMiningProgress(0);
-                        this.mineStartTime = time; // Reset start time if not mining but looking
+                        
+                        if (this.isMining) {
+                            const hardness = HARDNESS[block.type] || 1000;
+                            const progress = Math.min((time - this.mineStartTime) / hardness, 1);
+                            setMiningProgress(progress);
+                            
+                            if (progress >= 1) {
+                                const removed = this.world.removeBlock(this.targetBlock.x, this.targetBlock.y, this.targetBlock.z);
+                                if (removed && this.world.particles) {
+                                    this.world.particles.emit(new THREE.Vector3(this.targetBlock.x, this.targetBlock.y, this.targetBlock.z), PALETTE[removed], 25);
+                                }
+                                this.isMining = false;
+                                setMiningProgress(0);
+                            }
+                        } else {
+                            setMiningProgress(0);
+                            this.mineStartTime = time; // Reset start time if not mining but looking
+                        }
                     }
                 }
             }

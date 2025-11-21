@@ -14,7 +14,8 @@ export class ParticleSystem {
     private dummy = new THREE.Object3D();
     private activeIndex = 0;
 
-    constructor(scene: THREE.Scene) {
+    constructor(scene: THREE.Scene, isMobile: boolean) {
+        this.count = isMobile ? 500 : 2000;
         const geometry = new THREE.BoxGeometry(0.12, 0.12, 0.12);
         const material = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true });
         this.mesh = new THREE.InstancedMesh(geometry, material, this.count);

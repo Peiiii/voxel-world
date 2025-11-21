@@ -1,6 +1,7 @@
 
 import * as THREE from 'three';
 import { WorldManager } from './WorldManager';
+import { InputManager } from './InputManager';
 
 export class PhysicsManager {
   public position = new THREE.Vector3(0, 100, 0); 
@@ -61,21 +62,21 @@ export class PhysicsManager {
     return false;
   }
 
-  public step = (dt: number, yaw: number, input: { f: boolean, b: boolean, l: boolean, r: boolean, jump: boolean, shift: boolean }) => {
-    // Input vector
-    const inputVec = new THREE.Vector3();
-    inputVec.z = Number(input.b) - Number(input.f); 
-    inputVec.x = Number(input.r) - Number(input.l);
+  public step = (dt: number, yaw: number, inputMgr: InputManager) => {
+    const input = inputMgr.getMovementInput();
     
-    if (inputVec.lengthSq() > 0) inputVec.normalize();
+    // Input vector (Analog x, z)
+    // In Physics: Forward is -Z, Right is +X.
+    // Input x is Right (+), z is Backward (+).
+    // So we map input.x -> x, input.z -> z directly (since InputManager returns z as backward/forward axis)
+    const inputVec = new THREE.Vector3(input.x, 0, input.z);
     inputVec.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
 
     // Physics constants
     const moveSpeed = this.flying ? 25 : 6;
     
-    // Movement Logic: Minecraft Style (Snappy on ground, drifty in air)
+    // Movement Logic
     if (this.flying) {
-        // Fly mode: snappy response but with some smoothing
         const lerpFactor = dt * 10;
         this.velocity.x = THREE.MathUtils.lerp(this.velocity.x, inputVec.x * moveSpeed, lerpFactor);
         this.velocity.z = THREE.MathUtils.lerp(this.velocity.z, inputVec.z * moveSpeed, lerpFactor);
@@ -85,31 +86,21 @@ export class PhysicsManager {
         if (input.shift) this.velocity.y = -15;
     } else {
         if (this.onGround) {
-            // Ground movement: Instant acceleration / Instant Stop
-            if (inputVec.lengthSq() > 0) {
+            if (inputVec.lengthSq() > 0.01) {
                 this.velocity.x = inputVec.x * moveSpeed;
                 this.velocity.z = inputVec.z * moveSpeed;
             } else {
-                // Instant stop (high friction)
-                const damping = Math.pow(0.0001, dt); // Very strong damping
+                const damping = Math.pow(0.0001, dt); 
                 this.velocity.x *= damping;
                 this.velocity.z *= damping;
                 if (Math.abs(this.velocity.x) < 0.1) this.velocity.x = 0;
                 if (Math.abs(this.velocity.z) < 0.1) this.velocity.z = 0;
             }
         } else {
-            // Air movement: Add force but preserve momentum
             const airAccel = 30;
             this.velocity.x += inputVec.x * airAccel * dt;
             this.velocity.z += inputVec.z * airAccel * dt;
             
-            // Air drag
-            const hVel = new THREE.Vector2(this.velocity.x, this.velocity.z);
-            if (hVel.length() > moveSpeed) {
-                // Cap max air speed slightly higher than walk speed to allow sprinting jumps in future
-                // But for now just cap at walk speed + drift
-            }
-            // Apply slight air resistance
             const airDrag = Math.pow(0.9, dt * 60); 
             this.velocity.x *= airDrag;
             this.velocity.z *= airDrag;
@@ -120,7 +111,7 @@ export class PhysicsManager {
 
         // Jump Logic
         const wasOnGround = this.onGround;
-        this.onGround = false; // Assume air until collision proves otherwise
+        this.onGround = false; 
 
         if (wasOnGround) {
             this.coyoteTime = 0.15; 
@@ -129,14 +120,14 @@ export class PhysicsManager {
         }
 
         if ((wasOnGround || this.coyoteTime > 0) && input.jump) {
-            this.velocity.y = 9; // Standard jump height
+            this.velocity.y = 9; 
             this.onGround = false;
             this.coyoteTime = 0;
             this.position.y += 0.2; 
         }
     }
 
-    // Physics Sub-stepping for collision accuracy
+    // Physics Sub-stepping
     const steps = 8; 
     const subDt = dt / steps;
 
@@ -157,7 +148,6 @@ export class PhysicsManager {
     pos.x += this.velocity.x * dt;
     if (this.testCollision(pos)) {
         if (this.onGround && !this.flying) {
-            // Auto-step up logic
             const stepCandidate = pos.clone();
             stepCandidate.y += 1.1; 
             if (!this.testCollision(stepCandidate)) {
@@ -201,7 +191,6 @@ export class PhysicsManager {
          if (this.velocity.y < 0) {
              this.onGround = true;
              this.velocity.y = 0;
-             // Snap to block surface
              this.position.y = Math.round(pos.y - this.playerHeight/2) + 0.5 + 0.0001;
          } else if (this.velocity.y > 0) {
              this.velocity.y = 0;

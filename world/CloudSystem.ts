@@ -9,7 +9,7 @@ export class CloudSystem {
     private dummy = new THREE.Object3D();
     private boundSize: number;
 
-    constructor(scene: THREE.Scene) {
+    constructor(scene: THREE.Scene, isMobile: boolean) {
         const geometry = new THREE.BoxGeometry(1, 1, 1);
         const material = new THREE.MeshBasicMaterial({ 
             color: 0xFFFFFF, 
@@ -17,12 +17,15 @@ export class CloudSystem {
             opacity: 0.85 
         });
         
-        this.mesh = new THREE.InstancedMesh(geometry, material, 1500);
+        const count = isMobile ? 500 : 1500;
+        this.mesh = new THREE.InstancedMesh(geometry, material, count);
         this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         this.mesh.castShadow = false;
         this.mesh.receiveShadow = false;
         scene.add(this.mesh);
         
+        // Use constant WORLD_SIZE for clouds to wrap around correctly, 
+        // even if physical terrain is smaller on mobile
         this.boundSize = WORLD_SIZE * 2.5; 
         this.generate();
     }

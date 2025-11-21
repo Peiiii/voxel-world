@@ -33,6 +33,7 @@ export class WorldManager {
     public spawnPoint = new THREE.Vector3(0, 100, 0); 
 
     private cameraRaycaster = new THREE.Raycaster();
+    private dirLight: THREE.DirectionalLight;
 
     constructor() {
         this.scene = new THREE.Scene();
@@ -42,11 +43,11 @@ export class WorldManager {
 
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300);
         
-        this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        
+        // Shadow map default, will be tuned in init
         this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
         this.cameraYawGroup = new THREE.Group();
         this.scene.add(this.cameraYawGroup);
@@ -60,17 +61,12 @@ export class WorldManager {
 
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
         this.scene.add(ambientLight);
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
-        dirLight.position.set(100, 150, 100);
-        dirLight.castShadow = true;
-        dirLight.shadow.mapSize.set(2048, 2048);
-        dirLight.shadow.camera.near = 0.5;
-        dirLight.shadow.camera.far = 300;
-        const sSize = 140;
-        dirLight.shadow.camera.left = -sSize; dirLight.shadow.camera.right = sSize;
-        dirLight.shadow.camera.top = sSize; dirLight.shadow.camera.bottom = -sSize;
-        dirLight.shadow.bias = -0.0004;
-        this.scene.add(dirLight);
+        
+        this.dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+        this.dirLight.position.set(100, 150, 100);
+        this.dirLight.castShadow = true;
+        this.dirLight.shadow.bias = -0.0004;
+        this.scene.add(this.dirLight);
 
         const sunSize = 30;
         const sunGeo = new THREE.BoxGeometry(sunSize, sunSize, sunSize);
@@ -82,12 +78,38 @@ export class WorldManager {
         this.scene.add(sunMesh);
     }
 
-    public init = (container: HTMLElement) => {
+    public init = (container: HTMLElement, isMobile: boolean) => {
         container.appendChild(this.renderer.domElement);
-        this.generateWorld();
         
-        this.particles = new ParticleSystem(this.scene);
-        this.cloudSystem = new CloudSystem(this.scene);
+        // Optimize for Mobile
+        if (isMobile) {
+            this.renderer.setPixelRatio(1.0); // Cap at 1.0
+            this.renderer.shadowMap.type = THREE.BasicShadowMap;
+            this.dirLight.shadow.mapSize.set(1024, 1024);
+            this.dirLight.shadow.camera.near = 0.5;
+            this.dirLight.shadow.camera.far = 150;
+            // Tighter shadow box
+            const sSize = 60;
+            this.dirLight.shadow.camera.left = -sSize; this.dirLight.shadow.camera.right = sSize;
+            this.dirLight.shadow.camera.top = sSize; this.dirLight.shadow.camera.bottom = -sSize;
+            
+            // Less aggressive fog so we can see the billboard/mountains now
+            this.scene.fog = new THREE.Fog(0x87CEEB, 40, 95);
+        } else {
+            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+            this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            this.dirLight.shadow.mapSize.set(2048, 2048);
+            this.dirLight.shadow.camera.near = 0.5;
+            this.dirLight.shadow.camera.far = 300;
+            const sSize = 140;
+            this.dirLight.shadow.camera.left = -sSize; this.dirLight.shadow.camera.right = sSize;
+            this.dirLight.shadow.camera.top = sSize; this.dirLight.shadow.camera.bottom = -sSize;
+        }
+        
+        this.generateWorld(isMobile);
+        
+        this.particles = new ParticleSystem(this.scene, isMobile);
+        this.cloudSystem = new CloudSystem(this.scene, isMobile);
         this.playerActor = new PlayerActor();
         this.scene.add(this.playerActor.mesh);
         this.selectionBox = new SelectionBox(this.scene);
@@ -141,8 +163,7 @@ export class WorldManager {
         this.playerActor?.setMining(mining);
     }
 
-    private generateWorld = () => {
-        // Data structure for CHUNKED rendering
+    private generateWorld = (isMobile: boolean) => {
         const chunkInstances = new Map<string, Record<string, number[]>>();
         const chunkBlockCoords = new Map<string, Record<string, {x:number, y:number, z:number}[]>>();
         const worldData = new Map<number, string>();
@@ -150,53 +171,38 @@ export class WorldManager {
         const storeBlock = (type: string | null, x: number, y: number, z: number) => {
             const key = getKey(x, y, z);
             
-            // If type is null, we are explicitly removing a block (hollowing out)
             if (type === null) {
                  if (worldData.has(key)) {
                      worldData.delete(key);
-                     // Note: This logic is only perfect if we haven't generated meshes yet.
-                     // Since we run this during generation phase, we can just manipulate worldData.
-                     // For chunks, we check worldData in the mesh build pass, but we also push to instances.
-                     // To support hollow structures, we should verify existence before pushing.
-                     // HOWEVER, since we push to arrays immediately below, removing from worldData isn't enough
-                     // to prevent the mesh from being built if it was already added.
-                     // A simple fix for generation-time hollowing is to just NOT call storeBlock for those spots,
-                     // but if we are carving out existing terrain, we need a way to track "removed".
-                     // For this implementation, structures will be built AFTER terrain, overwriting the data.
-                     // The mesh generator iterates over worldData. No, it iterates over arrays. 
-                     // Actually, the correct way for this simple engine:
-                     // 1. Generate Terrain map. 2. Carve holes. 3. Add structures. 4. Build Meshes from final map.
-                     // But currently storeBlock pushes to instances immediately. 
-                     // Let's change storeBlock to ONLY update map, then build instances later?
-                     // Too big refactor.
-                     // Alternative: 'storeBlock' pushes to a specific map, and we convert map to instances at the end.
                  }
                  return;
             }
 
-            if (!worldData.has(key)) {
-                worldData.set(key, type);
-            } else {
-                // Overwriting existing block (e.g. road over grass)
-                worldData.set(key, type);
-            }
+            worldData.set(key, type);
         };
 
         const heightNoise = new SimpleNoise(123);
         const detailNoise = new SimpleNoise(456);
         const forestNoise = new SimpleNoise(789);
-        const offset = 120; // Expanded world size (approx WORLD_SIZE / 2)
+        
+        // Mobile render distance covers roughly -85 to 85
+        const offset = isMobile ? 85 : 120; 
+
+        let spawnHeight = 0;
 
         // --- TERRAIN PASS ---
         for (let x = -offset; x < offset; x++) {
             for (let z = -offset; z < offset; z++) {
                 const distFromCenter = Math.sqrt(x*x + z*z);
                 
-                const isOcean = distFromCenter > 105; // Pushed out ocean
-                const isAbyss = (x < -55 && x > -95 && z > -20 && z < 20);
-                const isVolcano = (x > 65 && x < 105 && z > -20 && z < 20);
-                const isDesert = (z > 65 && z < 105 && x > -35 && x < 35);
-                const isMountain = (z < -65 && z > -105 && x > -40 && x < 40);
+                const isOcean = distFromCenter > (isMobile ? 80 : 105); 
+                
+                // Shifted coordinates closer to center for mobile visibility
+                const isAbyss = (x < -45 && x > -85 && z > -20 && z < 20);  // Was -55 to -95
+                const isVolcano = (x > 45 && x < 85 && z > -20 && z < 20);   // Was 65 to 105
+                const isMountain = (z < -45 && z > -85 && x > -40 && x < 40); // Was -65 to -105
+                
+                const isDesert = (z > 45 && z < 85 && x > -35 && x < 35); // Shifted closer
 
                 let h = 15; 
                 let surface = BlockType.GRASS;
@@ -207,11 +213,11 @@ export class WorldManager {
 
                 if (isOcean) {
                     biome = 'ocean';
-                    h -= (distFromCenter - 105) * 5;
+                    h -= (distFromCenter - (isMobile ? 80 : 105)) * 5;
                     surface = BlockType.SAND;
                 } else if (isAbyss) {
                     biome = 'abyss';
-                    const dx = x - (-75);
+                    const dx = x - (-65); // Shifted center
                     const dz = z - 0;
                     const d = Math.sqrt(dx*dx + dz*dz);
                     if (d < 22) {
@@ -222,7 +228,8 @@ export class WorldManager {
                     }
                 } else if (isVolcano) {
                     biome = 'volcano';
-                    const dx = x - 85; const dz = z - 0;
+                    const dx = x - 65; // Shifted center
+                    const dz = z - 0;
                     const d = Math.sqrt(dx*dx + dz*dz);
                     h += 55 * Math.exp(-d * 0.13);
                     surface = BlockType.BASALT;
@@ -233,7 +240,7 @@ export class WorldManager {
                     }
                 } else if (isMountain) {
                     biome = 'mountain';
-                    const dx = x - 0; const dz = z - (-85);
+                    const dx = x - 0; const dz = z - (-65); // Shifted center
                     const d = Math.sqrt(dx*dx + dz*dz);
                     if (d < 35) {
                         const factor = (35 - d) / 35; 
@@ -256,9 +263,15 @@ export class WorldManager {
 
                 h = Math.round(h);
 
-                // Optimization: Don't store every stone block deep underground, only near surface/caves
-                // For this demo, we fill down to -5
-                for (let y = -5; y <= h; y++) {
+                // Fix Spawn Point
+                if (x === 0 && z === 0) {
+                    spawnHeight = Math.max(h, 12); // Ensure not a hole
+                }
+
+                // Optimize depth: Reduce drawing depth heavily on mobile to save instance count
+                const minDepth = isMobile ? h - 2 : -5;
+
+                for (let y = minDepth; y <= h; y++) {
                     let type = sub;
                     if (y === h) type = surface;
                     if (y < h - 4) type = BlockType.STONE;
@@ -278,7 +291,7 @@ export class WorldManager {
                 }
                 
                 if (biome === 'volcano') {
-                    const dx = x - 85; const dz = z;
+                    const dx = x - 65; const dz = z; // Shifted
                     const d = Math.sqrt(dx*dx + dz*dz);
                     if (d < 5.5 && 40 > h) { 
                         for(let l = h+1; l <= 40; l++) storeBlock(BlockType.LAVA, x, l, z);
@@ -287,18 +300,23 @@ export class WorldManager {
             }
         }
 
+        // Set the spawn point safely above ground
+        this.spawnPoint.set(0, Math.max(spawnHeight, WATER_LEVEL) + 2, 0);
+
         // Structures
         this.buildTown(storeBlock, 15); 
-        this.buildCathedral(storeBlock, 0, 15, 60); // Large Cathedral at the end of the town
+        
+        // Always create billboard (user request)
         this.createBillboard(storeBlock);
 
-        // --- DECORATION PASS & MESH GENERATION CONVERSION ---
-        // Note: We traverse worldData to add decoration, then we build instances.
+        // Re-enable Cathedral for everyone
+        this.buildCathedral(storeBlock, 0, 15, 60); 
+
+        // --- DECORATION PASS ---
         
         for (let x = -offset + 2; x < offset - 2; x++) {
             for (let z = -offset + 2; z < offset - 2; z++) {
                 let groundY = -999;
-                // Find surface
                 for(let y = 100; y > -10; y--) {
                      if (worldData.has(getKey(x, y, z))) {
                          const t = worldData.get(getKey(x, y, z));
@@ -310,12 +328,11 @@ export class WorldManager {
                 }
                 
                 if (groundY === -999) continue;
-                if (worldData.has(getKey(x, groundY+1, z))) continue; // Already occupied (e.g. by house or road)
+                if (worldData.has(getKey(x, groundY+1, z))) continue; 
                 
                 const surfaceBlock = worldData.get(getKey(x, groundY, z));
                 if (!surfaceBlock) continue;
 
-                // Don't decorate on paths/floors
                 if (surfaceBlock === BlockType.PATH || surfaceBlock === BlockType.PLANKS || surfaceBlock === BlockType.BRICK || surfaceBlock === BlockType.STONE || surfaceBlock === BlockType.RED_WOOL) continue;
 
                 const rand = Math.random();
@@ -341,7 +358,7 @@ export class WorldManager {
                         }
                     }
                 } else if (surfaceBlock === BlockType.SAND) {
-                     if (z > 60 && rand < 0.005) {
+                     if (z > (isMobile ? 35 : 45) && rand < 0.005) {
                           storeBlock(BlockType.CACTUS, x, groundY+1, z);
                           if (Math.random() > 0.5) storeBlock(BlockType.CACTUS, x, groundY+2, z);
                      } else if (groundY <= WATER_LEVEL + 2 && rand < 0.02) {
@@ -349,8 +366,8 @@ export class WorldManager {
                      }
                 } 
 
-                // Mobs
-                if (rand < 0.005) {
+                // Mobs - Reduce on mobile
+                if (rand < (isMobile ? 0.001 : 0.005)) {
                     let type: any = null;
                     if (surfaceBlock === BlockType.GRASS) type = Math.random() > 0.5 ? 'cow' : 'pig';
                     if (surfaceBlock === BlockType.SAND && z <= 30) type = 'villager'; 
@@ -364,10 +381,8 @@ export class WorldManager {
             }
         }
 
-        // Finally, convert the Map to the Chunk Arrays
         worldData.forEach((type, key) => {
             if (type === null) return;
-            // Extract coords from key
             let k = key;
             const y = (k & 0xFF) - 64;
             k = k >> 8;
@@ -403,7 +418,6 @@ export class WorldManager {
             }
         });
 
-        // --- MESH BUILD (CHUNKED) ---
         this.buildChunkMeshes(chunkInstances, chunkBlockCoords, worldData);
     }
 
@@ -554,16 +568,14 @@ export class WorldManager {
         const height = 22;
         const towerH = 34;
 
-        // Clear area
         for(let x = cx - width/2 - 2; x <= cx + width/2 + 2; x++) {
             for(let z = cz - 2; z <= cz + length + 2; z++) {
                 for(let y = cy; y < cy + towerH; y++) {
-                    storeBlock(null, x, y, z); // Remove nature
+                    storeBlock(null, x, y, z); 
                 }
             }
         }
 
-        // Floor & Carpet
         for(let x = -width/2; x <= width/2; x++) {
             for(let z = 0; z < length; z++) {
                 if (Math.abs(x) < 3) storeBlock(BlockType.RED_WOOL, cx + x, cy, cz + z);
@@ -571,28 +583,23 @@ export class WorldManager {
             }
         }
 
-        // Walls
         for(let y = 0; y < height; y++) {
             for(let z = 0; z < length; z++) {
-                // Side Walls
                 storeBlock(BlockType.STONE, cx - width/2, cy + y, cz + z);
                 storeBlock(BlockType.STONE, cx + width/2, cy + y, cz + z);
 
-                // Stained Glass Windows
                 if (y > 4 && y < height - 4 && z % 6 > 2) {
                     const color = (z % 12 > 6) ? BlockType.NEON_CYAN : BlockType.NEON_MAGENTA;
                     storeBlock(BlockType.GLASS, cx - width/2, cy + y, cz + z);
-                    storeBlock(color, cx - width/2, cy + y + 1, cz + z); // Detail
+                    storeBlock(color, cx - width/2, cy + y + 1, cz + z); 
                     storeBlock(BlockType.GLASS, cx + width/2, cy + y, cz + z);
                 }
             }
-            // Back Wall
             for(let x = -width/2; x <= width/2; x++) {
                 storeBlock(BlockType.STONE, cx + x, cy + y, cz + length);
             }
         }
 
-        // Towers (Front)
         const tSize = 5;
         for(let tx of [-width/2 + tSize/2, width/2 - tSize/2]) {
             for(let y = 0; y < towerH; y++) {
@@ -605,7 +612,6 @@ export class WorldManager {
             }
         }
 
-        // Roof
         let rx = width/2;
         let ry = cy + height;
         while(rx >= 0) {
@@ -617,7 +623,6 @@ export class WorldManager {
             ry++;
         }
 
-        // Interior: Altar
         for(let x = -2; x <= 2; x++) {
             storeBlock(BlockType.GOLD, cx+x, cy+1, cz + length - 4);
             storeBlock(BlockType.GOLD, cx+x, cy+2, cz + length - 4);
@@ -630,7 +635,6 @@ export class WorldManager {
         const halfD = Math.floor(depth / 2);
         const wallHeight = 4;
         
-        // Clear space (optional but good for dense forests)
         for(let dx = -halfW; dx <= halfW; dx++) {
              for(let dz = -halfD; dz <= halfD; dz++) {
                  for(let dy = 0; dy < 6; dy++) storeBlock(null, cx+dx, y+dy, cz+dz);
@@ -649,19 +653,11 @@ export class WorldManager {
         }
         for (let dx = -halfW; dx <= halfW; dx++) {
             for (let dz = -halfD; dz <= halfD; dz++) {
-                if (Math.abs(dx) < halfW && Math.abs(dz) < halfD) {
-                    // Hollow inside
-                } else {
-                    // Already built walls
-                }
-                // Floor
                 storeBlock(BlockType.PLANKS, cx + dx, y, cz + dz);
             }
         }
-        // Door
         storeBlock(null, cx, y+1, cz+halfD);
         storeBlock(null, cx, y+2, cz+halfD);
-        // Windows
         storeBlock(BlockType.GLASS, cx - halfW + 2, y+2, cz+halfD);
         storeBlock(BlockType.GLASS, cx + halfW - 2, y+2, cz+halfD);
         
@@ -729,7 +725,6 @@ export class WorldManager {
     }
 
     private createBillboard(addBlock: Function) {
-        // Cyberpunk/Sci-Fi Screen logic - South Side
         const centerZ = 110; 
         const centerY = 65;  
         const width = 90;
@@ -737,14 +732,12 @@ export class WorldManager {
         const halfW = width / 2;
         const halfH = height / 2;
         
-        // Frame & Background
         for (let x = -halfW; x <= halfW; x++) {
             for (let y = -halfH; y <= halfH; y++) {
                 const wx = x;
                 const wy = centerY + y;
                 const wz = centerZ;
 
-                // Cyberpunk Frame pattern
                 const isEdge = x === -halfW || x === halfW || y === -halfH || y === halfH;
                 const isInnerEdge = (Math.abs(x) === halfW-2 && Math.abs(y) < halfH-2) || (Math.abs(y) === halfH-2 && Math.abs(x) < halfW-2);
                 
@@ -762,7 +755,6 @@ export class WorldManager {
             }
         }
 
-        // Text Drawing
         const FONT_MAP: Record<string, number[]> = {
             'V': [17, 17, 17, 17, 17, 10, 4],
             'O': [14, 17, 17, 17, 17, 17, 14],
@@ -780,7 +772,6 @@ export class WorldManager {
         const spacing = 2; 
         
         const totalWidth = (text.length * charWidth) + ((text.length - 1) * spacing);
-        // FIX: Text direction. Start from Left (negative X) and move Right (positive X)
         let cursorX = -Math.floor(totalWidth / 2);
         const textY = centerY + 3;
 
@@ -791,9 +782,7 @@ export class WorldManager {
                 for (let row = 0; row < 7; row++) {
                     const bits = map[row];
                     for (let col = 0; col < 5; col++) {
-                         // Iterate bits from left to right
                          if ((bits >> (4 - col)) & 1) {
-                            // Draw at cursor + col
                             addBlock(BlockType.NEON_CYAN, cursorX + col, textY - row, centerZ - 1);
                          }
                     }

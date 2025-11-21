@@ -9,9 +9,13 @@ export const UIOverlay: React.FC = () => {
   const gameStarted = useGameStore(state => state.gameStarted);
   const setGameStarted = useGameStore(state => state.setGameStarted);
   const presenter = usePresenter();
-  const isMobile = presenter.isMobile; // Read once from presenter
+  const isMobile = presenter.isMobile;
 
   const joystickRef = useRef<HTMLDivElement>(null);
+  const camZoneRef = useRef<HTMLDivElement>(null);
+  const lastCamX = useRef(0);
+  const lastCamY = useRef(0);
+
   const [joystickVec, setJoystickVec] = useState({ x: 0, y: 0 });
   const [showHelp, setShowHelp] = useState(false);
 
@@ -30,28 +34,71 @@ export const UIOverlay: React.FC = () => {
       presenter.requestPointerLock();
   };
 
-  // Mobile Joystick Logic
-  const handleTouchStart = (e: React.TouchEvent) => { handleTouchMove(e); };
-  const handleTouchMove = (e: React.TouchEvent) => {
+  // --- ROBUST JOYSTICK LOGIC (Pointer Events) ---
+  const handlePointerDown = (e: React.PointerEvent) => {
       if (!joystickRef.current) return;
+      e.preventDefault(); // Prevent scrolling
+      e.stopPropagation();
+      
+      // Capture pointer to keep tracking even if finger leaves the div
+      joystickRef.current.setPointerCapture(e.pointerId);
+      handlePointerMove(e);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+      if (!joystickRef.current) return;
+      if (!e.buttons) return; // Only track if pressed
+
       const rect = joystickRef.current.getBoundingClientRect();
-      const touch = e.changedTouches[0];
       const centerX = rect.left + rect.width / 2;
       const centerY = rect.top + rect.height / 2;
       
-      let dx = (touch.clientX - centerX) / (rect.width / 2);
-      let dy = (touch.clientY - centerY) / (rect.height / 2);
+      let dx = (e.clientX - centerX) / (rect.width / 2);
+      let dy = (e.clientY - centerY) / (rect.height / 2);
       
-      // Clamp
+      // Clamp circular
       const len = Math.sqrt(dx*dx + dy*dy);
       if (len > 1) { dx /= len; dy /= len; }
       
       setJoystickVec({ x: dx, y: dy });
       presenter.input.setVirtualMove(dx, dy);
   };
-  const handleTouchEnd = () => {
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+      if (!joystickRef.current) return;
+      joystickRef.current.releasePointerCapture(e.pointerId);
       setJoystickVec({ x: 0, y: 0 });
       presenter.input.setVirtualMove(0, 0);
+  };
+
+  // --- ROBUST CAMERA ZONE LOGIC ---
+  const handleCameraPointerDown = (e: React.PointerEvent) => {
+      if (!camZoneRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      
+      camZoneRef.current.setPointerCapture(e.pointerId);
+      lastCamX.current = e.clientX;
+      lastCamY.current = e.clientY;
+  };
+
+  const handleCameraPointerMove = (e: React.PointerEvent) => {
+      if (!camZoneRef.current || !e.buttons) return;
+      e.preventDefault();
+
+      const dx = e.clientX - lastCamX.current;
+      const dy = e.clientY - lastCamY.current;
+      
+      presenter.rotateCamera(dx, dy);
+
+      lastCamX.current = e.clientX;
+      lastCamY.current = e.clientY;
+  };
+
+  const handleCameraPointerUp = (e: React.PointerEvent) => {
+      if (camZoneRef.current) {
+        camZoneRef.current.releasePointerCapture(e.pointerId);
+      }
   };
 
   return (
@@ -101,27 +148,47 @@ export const UIOverlay: React.FC = () => {
       {/* Mobile Controls */}
       {isMobile && isLocked && (
           <>
+            {/* Invisible Camera Touch Zone (Right Side) */}
+            <div 
+                ref={camZoneRef}
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    right: 0,
+                    width: '60%', // Covers right side
+                    height: '100%',
+                    zIndex: 5,
+                    touchAction: 'none',
+                    pointerEvents: 'auto'
+                }}
+                onPointerDown={handleCameraPointerDown}
+                onPointerMove={handleCameraPointerMove}
+                onPointerUp={handleCameraPointerUp}
+                onPointerCancel={handleCameraPointerUp}
+            />
+
             {/* Joystick Zone */}
             <div 
                 style={{ 
                     position: 'absolute', bottom: 40, left: 40, width: 120, height: 120, 
                     background: 'rgba(255,255,255,0.2)', borderRadius: '50%', pointerEvents: 'auto',
-                    border: '2px solid rgba(255,255,255,0.4)'
+                    border: '2px solid rgba(255,255,255,0.4)', touchAction: 'none', zIndex: 10
                 }}
                 ref={joystickRef}
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
             >
                 <div style={{
                     position: 'absolute', top: '50%', left: '50%', width: 50, height: 50,
-                    background: 'rgba(255,255,255,0.8)', borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.8)', borderRadius: '50%', pointerEvents: 'none',
                     transform: `translate(-50%, -50%) translate(${joystickVec.x * 40}px, ${joystickVec.y * 40}px)`
                 }} />
             </div>
 
             {/* Buttons Zone */}
-            <div style={{ position: 'absolute', bottom: 40, right: 40, display: 'flex', flexDirection: 'column', gap: 20, pointerEvents: 'auto' }}>
+            <div style={{ position: 'absolute', bottom: 40, right: 40, display: 'flex', flexDirection: 'column', gap: 20, pointerEvents: 'auto', zIndex: 11 }}>
                 <div style={{ display: 'flex', gap: 20 }}>
                     <button className="btn" style={{ width: 60, height: 60, padding: 0, fontSize: '12px' }} onTouchStart={() => presenter.toggleFly()}>FLY</button>
                     <button className="btn" style={{ width: 60, height: 60, padding: 0, fontSize: '12px' }} 
