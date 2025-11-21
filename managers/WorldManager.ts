@@ -587,6 +587,7 @@ export class WorldManager {
 
         const heightNoise = new SimpleNoise(123);
         const detailNoise = new SimpleNoise(456);
+        const forestNoise = new SimpleNoise(789);
         const offset = 80;
 
         // --- TERRAIN PASS ---
@@ -650,6 +651,7 @@ export class WorldManager {
                     surface = BlockType.SAND;
                     sub = BlockType.SANDSTONE;
                 } else {
+                    // Plains/Forest Default
                     if (heightNoise.noise(x*0.03 + 100, 0, z*0.03) > 0.65) {
                          h = 10; 
                     }
@@ -710,19 +712,38 @@ export class WorldManager {
                 const surfaceBlock = worldData.get(getKey(x, groundY, z));
                 const rand = Math.random();
 
+                // Forest vs Plains distribution
+                // Low frequency noise for broad biomes of forest vs plains
+                const fVal = forestNoise.noise(x*0.06, 0, z*0.06); 
+                const isForest = fVal > 0.15; // 0.15 threshold makes forests somewhat patchy but distinct
+
                 if (surfaceBlock === BlockType.GRASS) {
-                    if (rand < 0.05) {
-                         if (rand < 0.01) this.generateTree(x, groundY, z, storeBlock, 'OAK');
-                         else if (rand < 0.02) this.generateTree(x, groundY, z, storeBlock, 'BIRCH');
-                         else if (rand < 0.03) storeBlock(BlockType.FLOWER_RED, x, groundY+1, z);
-                         else storeBlock(BlockType.TALL_GRASS, x, groundY+1, z);
+                    if (isForest) {
+                        // Forest Biome
+                        if (rand < 0.06) { // High tree density
+                            if (rand < 0.01) this.generateTree(x, groundY, z, storeBlock, 'BIRCH');
+                            else this.generateTree(x, groundY, z, storeBlock, 'OAK');
+                        } else if (rand < 0.15) {
+                            storeBlock(BlockType.TALL_GRASS, x, groundY+1, z);
+                        }
+                    } else {
+                        // Plains Biome (Sparse trees)
+                        if (rand < 0.003) { // Very low tree density
+                             this.generateTree(x, groundY, z, storeBlock, 'OAK');
+                        } else if (rand < 0.05) {
+                             if (rand < 0.025) storeBlock(BlockType.FLOWER_RED, x, groundY+1, z);
+                             else storeBlock(BlockType.FLOWER_YELLOW, x, groundY+1, z);
+                        } else if (rand < 0.1) {
+                             storeBlock(BlockType.TALL_GRASS, x, groundY+1, z);
+                        }
                     }
                 } else if (surfaceBlock === BlockType.SAND) {
-                     if (z > 30 && rand < 0.02) {
+                     // Desert vegetation (Sparse)
+                     if (z > 30 && rand < 0.005) { // Very sparse cactus
                           storeBlock(BlockType.CACTUS, x, groundY+1, z);
                           if (Math.random() > 0.5) storeBlock(BlockType.CACTUS, x, groundY+2, z);
                           if (Math.random() > 0.8) storeBlock(BlockType.CACTUS, x, groundY+3, z);
-                     } else if (groundY <= WATER_LEVEL + 2 && rand < 0.05) {
+                     } else if (groundY <= WATER_LEVEL + 2 && rand < 0.02) {
                           storeBlock(BlockType.DEAD_BUSH, x, groundY+1, z);
                      }
                 } else if (surfaceBlock === BlockType.SNOW && rand < 0.01) {
@@ -765,7 +786,7 @@ export class WorldManager {
             BlockType.WOOD, BlockType.LEAVES, BlockType.BIRCH_WOOD, BlockType.BIRCH_LEAVES,
             BlockType.PEACH_WOOD, BlockType.PEACH_LEAVES, BlockType.CACTUS, 
             BlockType.PLANKS, BlockType.BRICK, BlockType.ROOF_TILE, BlockType.SIGN_POST,
-            BlockType.RED_WOOL, BlockType.WHEAT
+            BlockType.RED_WOOL, BlockType.WHEAT, BlockType.STONE // Stone casts shadow now for the slab
         ];
         
         const isOpaque = (t: string) => {
@@ -970,9 +991,41 @@ export class WorldManager {
     }
 
     private createBillboard(addBlock: Function) {
-        const billboardZ = -80; 
-        const billboardY = 60;
-        const scale = 4;
+        // Cyberpunk/Sci-Fi Screen logic - South Side
+        const centerZ = 110; 
+        const centerY = 65;  
+        const width = 90;
+        const height = 36;
+        const halfW = width / 2;
+        const halfH = height / 2;
+        
+        // Frame & Background
+        for (let x = -halfW; x <= halfW; x++) {
+            for (let y = -halfH; y <= halfH; y++) {
+                const wx = x;
+                const wy = centerY + y;
+                const wz = centerZ;
+
+                // Cyberpunk Frame pattern
+                const isEdge = x === -halfW || x === halfW || y === -halfH || y === halfH;
+                const isInnerEdge = (Math.abs(x) === halfW-2 && Math.abs(y) < halfH-2) || (Math.abs(y) === halfH-2 && Math.abs(x) < halfW-2);
+                
+                if (isEdge) {
+                     addBlock(BlockType.OBSIDIAN, wx, wy, wz);
+                } else if (isInnerEdge) {
+                     addBlock(BlockType.NEON_MAGENTA, wx, wy, wz);
+                } else {
+                     addBlock(BlockType.DARK_MATTER, wx, wy, wz);
+                }
+                
+                // Add some depth/structure behind
+                if (Math.random() < 0.05) {
+                     addBlock(BlockType.OBSIDIAN, wx, wy, wz + 1);
+                }
+            }
+        }
+
+        // Text Drawing
         const FONT_MAP: Record<string, number[]> = {
             'V': [17, 17, 17, 17, 17, 10, 4],
             'O': [14, 17, 17, 17, 17, 17, 14],
@@ -984,44 +1037,29 @@ export class WorldManager {
             'D': [30, 17, 17, 17, 17, 17, 30],
             ' ': [0, 0, 0, 0, 0, 0, 0]
         };
+        
         const text = "VOXEL WORLD";
-        const fontW = 5;
-        const spacing = 1;
-        let cursorX = -Math.floor(((text.length * (fontW * scale) + (text.length - 1) * (spacing * scale))) / 2);
+        const charWidth = 5;
+        const spacing = 2; 
         
-        const padX = 6, padY = 6;
-        const screenW = (text.length * (fontW * scale)) + padX*2;
-        const screenH = (7 * scale) + padY * 2;
-        const screenLeft = cursorX - padX;
-        const screenBottom = billboardY - (7*scale) - padY;
-        
-        for(let bx = 0; bx < screenW; bx++) {
-            for(let by = 0; by < screenH; by++) {
-                const posX = screenLeft + bx;
-                const posY = screenBottom + by;
-                const isBorder = bx === 0 || bx === screenW - 1 || by === 0 || by === screenH - 1;
-                addBlock(isBorder ? BlockType.NEON_CYAN : BlockType.DARK_MATTER, posX, posY, billboardZ);
-            }
-        }
+        const totalWidth = (text.length * charWidth) + ((text.length - 1) * spacing);
+        let cursorX = Math.floor(totalWidth / 2);
+        const textY = centerY + 3;
 
-        for(let i = 0; i < text.length; i++) {
+        for (let i = 0; i < text.length; i++) {
             const char = text[i];
             const map = FONT_MAP[char];
             if (map) {
                 for (let row = 0; row < 7; row++) {
                     const bits = map[row];
                     for (let col = 0; col < 5; col++) {
-                        if ((bits >> (4 - col)) & 1) {
-                            for(let sx = 0; sx < scale; sx++) {
-                                for(let sy = 0; sy < scale; sy++) {
-                                    addBlock(BlockType.NEON_MAGENTA, cursorX + (col * scale) + sx, billboardY - (row * scale) - sy, billboardZ + 1);
-                                }
-                            }
-                        }
+                         if ((bits >> (4 - col)) & 1) {
+                            addBlock(BlockType.NEON_CYAN, cursorX - col, textY - row, centerZ - 1);
+                         }
                     }
                 }
             }
-            cursorX += (fontW * scale) + (spacing * scale);
+            cursorX -= (charWidth + spacing);
         }
     }
 
