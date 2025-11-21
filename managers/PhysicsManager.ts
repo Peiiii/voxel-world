@@ -85,7 +85,12 @@ export class PhysicsManager {
     this.velocity.x *= friction;
     this.velocity.z *= friction;
 
-    if (this.onGround) {
+    // Gravity & Jumping
+    // Reset onGround for this frame, but keep a copy to check if we CAN jump (coyote time)
+    const wasOnGround = this.onGround;
+    this.onGround = false; // Assume air until collision proves otherwise
+
+    if (wasOnGround) {
         this.coyoteTime = 0.15; // 150ms grace period
     } else {
         this.coyoteTime -= dt;
@@ -99,12 +104,11 @@ export class PhysicsManager {
         this.velocity.y -= 32 * dt;
         
         // Jump Logic
-        if ((this.onGround || this.coyoteTime > 0) && input.jump) {
+        if ((wasOnGround || this.coyoteTime > 0) && input.jump) {
             this.velocity.y = 12; // Reliable jump height
             this.onGround = false;
             this.coyoteTime = 0;
-            // Apply upward movement immediately to break ground contact
-            this.position.y += 0.1; 
+            this.position.y += 0.2; // Boost slightly to clear ground immediately
         }
     }
 
@@ -129,6 +133,7 @@ export class PhysicsManager {
     pos.x += this.velocity.x * dt;
     if (this.testCollision(pos)) {
         if (this.onGround && !this.flying) {
+            // Auto-step up
             const stepCandidate = pos.clone();
             stepCandidate.y += 1.1; 
             if (!this.testCollision(stepCandidate)) {
@@ -179,7 +184,7 @@ export class PhysicsManager {
          }
     } else {
         this.position.y = pos.y;
-        this.onGround = false;
+        // Do NOT set onGround = false here, as it might have been set to true in a previous substep
     }
   }
 }

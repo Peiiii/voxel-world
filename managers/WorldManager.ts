@@ -194,7 +194,7 @@ class PlayerActor {
         const armGeo = new THREE.BoxGeometry(0.2, 0.7, 0.2);
         this.armL = new THREE.Mesh(armGeo, skinMat); this.armL.position.set(-0.4, 1.05, 0);
         this.armR = new THREE.Mesh(armGeo, skinMat); this.armR.position.set(0.4, 1.05, 0);
-        this.armR.geometry.translate(0, -0.25, 0); // Shift pivot for better swing
+        this.armR.geometry.translate(0, -0.25, 0); // Shift pivot to top
         this.armR.position.y += 0.25;
         this.mesh.add(this.armL, this.armR);
 
@@ -227,9 +227,9 @@ class PlayerActor {
         // Mining / Idle Arm Animation
         if (this.isMining) {
             this.mineAnimTime += dt * 15;
-            // Swing DOWN/FORWARD (Negative X rotation)
+            // Swing Forward (Positive X in this Rig due to coordinate alignment)
             const swing = Math.abs(Math.sin(this.mineAnimTime)); 
-            this.armR.rotation.x = - (swing * 1.5); 
+            this.armR.rotation.x = (swing * 1.5); // Changed to positive to swing forward
             this.armR.rotation.z = 0;
         } else {
             const lerp = 10 * dt;
@@ -568,11 +568,6 @@ export class WorldManager {
         };
 
         // --- ZONE CONFIG ---
-        // Center (0,0) is Tao Hua Yuan (Flat Plain + Creek)
-        // North (Negative Z) is Mountains
-        // East (Positive X) is Lake
-        // Edges (dist > 70) is Ocean
-
         const heightNoise = new SimpleNoise(123);
         const detailNoise = new SimpleNoise(456);
         
@@ -598,11 +593,10 @@ export class WorldManager {
                 // Lake Influence: Stronger at X > 30, Z between -20 and 20
                 let lakeMask = 0;
                 if (x > 20 && x < 60 && z > -30 && z < 30) {
-                    // Elliptical lake shape
                     const dx = (x - 40) / 20;
                     const dz = z / 25;
                     if (dx*dx + dz*dz < 1) {
-                        lakeMask = 1 - (dx*dx + dz*dz); // 1 at center of lake
+                        lakeMask = 1 - (dx*dx + dz*dz);
                     }
                 }
 
@@ -627,25 +621,22 @@ export class WorldManager {
 
                 if (lakeMask > 0) {
                     // Dig out lake
-                    // Smooth transition into water
                     h = THREE.MathUtils.lerp(h, WATER_LEVEL - 4, lakeMask);
                 }
 
                 // Creek in Village
-                // Simple sine wave river winding through plains
                 let isCreek = false;
                 if (isVillage && oceanMask > 0.9) {
                     const creekPath = 10 * Math.sin(x * 0.1) + 5 * Math.cos(x * 0.05);
                     const distToCreek = Math.abs(z - creekPath);
                     if (distToCreek < 4) {
-                        // Smooth bank
                         const t = distToCreek / 4;
                         h = THREE.MathUtils.lerp(WATER_LEVEL - 2, h, t);
                         isCreek = distToCreek < 3; // Water width
                     }
                 }
 
-                // Minor noise for texture on plains (but keep it walkable, no holes)
+                // Minor noise for texture on plains
                 if (h >= VILLAGE_LEVEL - 1 && oceanMask > 0.9) {
                     const smallDetail = detailNoise.noise(x*0.1, 0, z*0.1) * 0.5;
                     h += smallDetail;
@@ -658,11 +649,10 @@ export class WorldManager {
                 let sub = BlockType.DIRT;
 
                 if (h <= WATER_LEVEL) {
-                    surface = BlockType.SAND; // Underwater / Beach
+                    surface = BlockType.SAND; 
                     if (lakeMask > 0) surface = BlockType.SAND; 
                 }
                 
-                // Mountain tops
                 if (h > 35) surface = BlockType.SNOW;
                 else if (h > 25 && mountainMask > 0.2) surface = BlockType.STONE;
 
@@ -672,7 +662,6 @@ export class WorldManager {
                     if (y === h) type = surface;
                     if (y < h - 3) type = BlockType.STONE;
                     
-                    // Ensure water/creek bed is sand/dirt
                     if (h <= WATER_LEVEL && y === h) type = BlockType.SAND;
 
                     storeBlock(type, x, y, z);
@@ -688,21 +677,19 @@ export class WorldManager {
         }
 
         // --- DECORATION PASS ---
-        // We do a second pass over coords to place trees/villages on top of the finalized height
         
-        this.spawnPoint.set(0, VILLAGE_LEVEL + 2, 0); // Reset spawn to default safe, updated later
+        // Set Specific Safe Spawn on the path near village entrance
+        // Ensuring it is high enough to not fall through initially
+        this.spawnPoint.set(0, VILLAGE_LEVEL + 3, 35); 
 
         // Structures
-        // We manually place structures at safe coordinates we know are flat-ish
         this.buildVillage(storeBlock, VILLAGE_LEVEL);
         this.createBillboard(storeBlock);
 
         // Flora
         for (let x = -offset + 2; x < offset - 2; x++) {
             for (let z = -offset + 2; z < offset - 2; z++) {
-                // Check height at this pos
                 let groundY = -999;
-                // Find top solid block
                 for(let y = 50; y > 0; y--) {
                     const k = `${x},${y},${z}`;
                     if (worldData.has(k) && worldData.get(k) !== BlockType.WATER) {
@@ -710,36 +697,32 @@ export class WorldManager {
                         break;
                     }
                 }
-                if (groundY === -999) continue; // No ground (water only?)
-                if (groundY < WATER_LEVEL) continue; // Underwater
+                if (groundY === -999) continue; 
+                if (groundY < WATER_LEVEL) continue; 
                 
-                // Check if space above is clear
                 if (worldData.has(`${x},${groundY+1},${z}`)) continue;
 
                 const dist = Math.sqrt(x*x + z*z);
                 const rand = Math.random();
 
-                // BIOME CHECK based on location
                 const isMountain = z < -20 && dist < 70;
                 const isVillageArea = dist < 55 && !isMountain;
                 const isLakeShore = x > 15 && x < 65 && z > -35 && z < 35 && groundY <= WATER_LEVEL + 2;
 
                 if (isVillageArea) {
-                    // Peach Trees & Bamboo
                     if (rand < 0.015) {
                         if (rand < 0.005) this.generateBamboo(x, groundY, z, storeBlock);
                         else this.generateLargePeachTree(x, groundY, z, storeBlock);
                     } else if (rand < 0.03) {
                         storeBlock(BlockType.FLOWER_RED, x, groundY+1, z);
                     } else if (rand < 0.005) {
-                         // Mobs
                          const type = Math.random() > 0.5 ? 'villager' : (Math.random() > 0.5 ? 'cow' : 'pig');
                          this.mobs.push(new Mob(type, x, groundY+1, z));
                          this.scene.add(this.mobs[this.mobs.length-1].mesh);
                     }
                 } else if (isMountain) {
                     if (groundY > 35) {
-                        // Snow peak - maybe nothing
+                        // Snow peak
                     } else {
                         if (rand < 0.02) this.generateTree(x, groundY, z, storeBlock, 'OAK');
                     }
@@ -747,15 +730,11 @@ export class WorldManager {
                     if (rand < 0.05) storeBlock(BlockType.TALL_GRASS, x, groundY+1, z);
                     if (rand < 0.01) this.generateTree(x, groundY, z, storeBlock, 'BIRCH');
                 } else {
-                    // Outer Plains / Forest
                     if (rand < 0.01) this.generateTree(x, groundY, z, storeBlock, 'OAK');
                     else if (rand < 0.05) storeBlock(BlockType.TALL_GRASS, x, groundY+1, z);
                 }
             }
         }
-
-        // Set Specific Safe Spawn on the path
-        this.spawnPoint.set(0, VILLAGE_LEVEL + 2, 45);
 
         // --- CULLING & MESH BUILD ---
         const isOpaque = (t: string) => {
@@ -772,10 +751,12 @@ export class WorldManager {
             const {x, y, z, type} = block;
             if (type === BlockType.WATER) {
                 let visible = false;
+                // Only render if adjacent to Air or Transparent non-water
                 const neighbors = [[x+1,y,z],[x-1,y,z],[x,y+1,z],[x,y-1,z],[x,y,z+1],[x,y,z-1]];
                 for (const [nx, ny, nz] of neighbors) {
                     const nKey = `${nx},${ny},${nz}`;
                     const nType = worldData.get(nKey);
+                    // Render if neighbor is Air OR (Not Water AND Transparent)
                     if (!nType || (nType !== BlockType.WATER && !isOpaque(nType))) {
                         visible = true; break;
                     }
@@ -803,7 +784,6 @@ export class WorldManager {
     }
 
     private buildVillage(storeBlock: Function, baseH: number) {
-        // Placed explicitly on the flattened area
         const houseCenters = [
             {x: -25, z: -15, w: 7, d: 7}, 
             {x: -20, z: 15, w: 7, d: 6}, 
@@ -813,7 +793,6 @@ export class WorldManager {
         ];
 
         for (const h of houseCenters) {
-            // Ensure foundation goes down to ground
             this.buildLargeHouse(storeBlock, h.x, baseH, h.z, h.w, h.d);
         }
 
@@ -1070,8 +1049,8 @@ export class WorldManager {
             
             if (key === BlockType.WATER) { 
                 mat.transparent = true; 
-                mat.opacity = 0.8; 
-                mat.roughness = 0.1; 
+                mat.opacity = 0.7; // Slightly less opaque to reduce harsh overlap visual
+                mat.roughness = 0.4; // More roughness to blur reflections
                 mat.metalness = 0.1;
             }
             if (key === BlockType.CLOUD) { 
