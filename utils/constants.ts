@@ -1,6 +1,7 @@
 
 export const WORLD_SIZE = 160; 
-export const WATER_LEVEL = 7;
+export const CHUNK_SIZE = 32;
+export const WATER_LEVEL = 11; // Slight raise to accommodate new terrain scale
 
 export const BlockType = {
   GRASS: 'grass',
@@ -38,7 +39,11 @@ export const BlockType = {
   RED_WOOL: 'red_wool',     // Table/Carpet
   SIGN_POST: 'sign_post',
   FARMLAND: 'farmland',
-  WHEAT: 'wheat'
+  WHEAT: 'wheat',
+  // Biome Expansion
+  LAVA: 'lava',
+  BASALT: 'basalt',
+  ICE: 'ice'
 };
 
 export const PALETTE = {
@@ -46,7 +51,7 @@ export const PALETTE = {
   [BlockType.DIRT]: 0x856042,
   [BlockType.STONE]: 0x919191,
   [BlockType.SAND]: 0xDCCFA3,
-  [BlockType.WATER]: 0x42A5F5, // Lighter, clearer blue
+  [BlockType.WATER]: 0x42A5F5, 
   [BlockType.SNOW]: 0xFFFFFF,
   [BlockType.WOOD]: 0x5C4033,
   [BlockType.LEAVES]: 0x4A8F28,
@@ -67,16 +72,20 @@ export const PALETTE = {
   [BlockType.DEAD_BUSH]: 0x946838,
   // Village Colors
   [BlockType.PEACH_WOOD]: 0x5C3A21,
-  [BlockType.PEACH_LEAVES]: 0xFFB7C5, // Pink
+  [BlockType.PEACH_LEAVES]: 0xFFB7C5, 
   [BlockType.BAMBOO]: 0x6FA830,
   [BlockType.PATH]: 0x917857,
   [BlockType.BRICK]: 0x8E5645,
-  [BlockType.ROOF_TILE]: 0x333344, // Dark Slate/Blueish
+  [BlockType.ROOF_TILE]: 0x333344, 
   [BlockType.WHITE_TILE]: 0xF0F0F0,
   [BlockType.RED_WOOL]: 0xCC3333,
   [BlockType.SIGN_POST]: 0x725538,
   [BlockType.FARMLAND]: 0x4F3321,
-  [BlockType.WHEAT]: 0xDCBB24
+  [BlockType.WHEAT]: 0xDCBB24,
+  // New Colors
+  [BlockType.LAVA]: 0xCF1020,
+  [BlockType.BASALT]: 0x2D2D2D,
+  [BlockType.ICE]: 0xA5F2F3
 };
 
 export const HARDNESS: Record<string, number> = {
@@ -90,6 +99,7 @@ export const HARDNESS: Record<string, number> = {
     [BlockType.PLANKS]: 1500,
     [BlockType.GLASS]: 250,
     [BlockType.WATER]: Infinity,
+    [BlockType.LAVA]: Infinity,
     [BlockType.CLOUD]: Infinity,
     [BlockType.OBSIDIAN]: Infinity,
     [BlockType.DARK_MATTER]: Infinity,
@@ -110,7 +120,9 @@ export const HARDNESS: Record<string, number> = {
     [BlockType.RED_WOOL]: 300,
     [BlockType.SIGN_POST]: 1000,
     [BlockType.FARMLAND]: 600,
-    [BlockType.WHEAT]: 100
+    [BlockType.WHEAT]: 100,
+    [BlockType.BASALT]: 3000,
+    [BlockType.ICE]: 500
 };
 
 // --- PERLIN NOISE ---
