@@ -3,14 +3,14 @@ import * as THREE from 'three';
 import { WorldManager } from './WorldManager';
 
 export class PhysicsManager {
-  public position = new THREE.Vector3(0, 40, 0);
+  public position = new THREE.Vector3(0, 100, 0); // Start high in the air
   public velocity = new THREE.Vector3();
   public flying = false;
   public onGround = false;
   
   private world: WorldManager | null = null;
-  private playerHeight = 1.8;
-  private playerWidth = 0.6;
+  private playerHeight = 1.7; // Reduced from 1.8 to prevent sticking on ceilings in 2-block gaps
+  private playerWidth = 0.5;  // Reduced slightly for easier traversal
   private boxMin = new THREE.Vector3();
   private boxMax = new THREE.Vector3();
   private coyoteTime = 0; // Time allowed to jump after leaving ground
@@ -120,8 +120,8 @@ export class PhysicsManager {
     }
 
     if (this.position.y < -30) {
-        // Respawn if fallen
-        this.position.set(0, 30, 60);
+        // Respawn if fallen - safe height
+        this.position.set(0, 100, 0);
         this.velocity.set(0, 0, 0);
     }
   }

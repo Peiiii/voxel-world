@@ -124,14 +124,34 @@ class Mob {
             const bz = Math.round(nextPos.z);
             const by = Math.round(nextPos.y);
             
+            // Check 2 blocks height for body
             if (!world.isSolid(bx, by, bz) && !world.isSolid(bx, by + 1, bz)) {
+                // Check ground
                 let groundY = by;
-                while(!world.isSolid(bx, groundY - 1, bz) && groundY > -10) groundY--;
+                let foundGround = false;
+                // Look down a bit to snap to ground
+                for(let i=0; i<3; i++) {
+                    if(world.isSolid(bx, groundY - 1, bz)) {
+                        foundGround = true;
+                        break;
+                    }
+                    groundY--;
+                }
+
+                // Or look up a bit (step up)
+                if (!foundGround) {
+                     if (world.isSolid(bx, by, bz)) { // Embedded, try move up
+                         if (!world.isSolid(bx, by+1, bz) && !world.isSolid(bx, by+2, bz)) {
+                             groundY = by + 1;
+                             foundGround = true;
+                         }
+                     }
+                }
                 
-                if (Math.abs(groundY - by) <= 2) {
+                if (foundGround && Math.abs(groundY - this.position.y) <= 1.5) {
                     this.position.x = nextPos.x;
                     this.position.z = nextPos.z;
-                    this.position.y = THREE.MathUtils.lerp(this.position.y, groundY, dt * 5);
+                    this.position.y = THREE.MathUtils.lerp(this.position.y, groundY, dt * 10);
                 } else {
                     this.rotation += Math.PI;
                     this.moveDir.set(Math.sin(this.rotation), 0, Math.cos(this.rotation));
@@ -434,7 +454,7 @@ export class WorldManager {
     public selectionBox: SelectionBox | null = null;
     
     public instancedMeshes: THREE.InstancedMesh[] = [];
-    public spawnPoint = new THREE.Vector3(0, 20, 0);
+    public spawnPoint = new THREE.Vector3(0, 100, 0); // Changed spawn to air
 
     private cameraRaycaster = new THREE.Raycaster();
 
@@ -676,62 +696,96 @@ export class WorldManager {
             }
         }
 
-        // --- DECORATION PASS ---
-        
-        // Set Specific Safe Spawn on the path near village entrance
-        // Ensuring it is high enough to not fall through initially
-        this.spawnPoint.set(0, VILLAGE_LEVEL + 3, 35); 
-
-        // Structures
+        // Structures (Before decoration so trees don't grow inside)
         this.buildVillage(storeBlock, VILLAGE_LEVEL);
         this.createBillboard(storeBlock);
 
-        // Flora
+        // --- DECORATION PASS (Flora & Fauna) ---
         for (let x = -offset + 2; x < offset - 2; x++) {
             for (let z = -offset + 2; z < offset - 2; z++) {
+                // Find highest block
                 let groundY = -999;
-                for(let y = 50; y > 0; y--) {
-                    const k = `${x},${y},${z}`;
-                    if (worldData.has(k) && worldData.get(k) !== BlockType.WATER) {
-                        groundY = y;
-                        break;
+                
+                for(let y = 60; y > 0; y--) {
+                    if (worldData.has(`${x},${y},${z}`)) {
+                        const b = worldData.get(`${x},${y},${z}`);
+                        // Treat trees as obstacles, don't spawn on top of them
+                        if (b === BlockType.LEAVES || b === BlockType.BIRCH_LEAVES || b === BlockType.PEACH_LEAVES || b === BlockType.WOOD || b === BlockType.BIRCH_WOOD || b === BlockType.PEACH_WOOD) {
+                            break; 
+                        }
+                        if (b !== BlockType.WATER && b !== BlockType.CLOUD) {
+                            groundY = y;
+                        }
+                        break; 
                     }
                 }
-                if (groundY === -999) continue; 
-                if (groundY < WATER_LEVEL) continue; 
                 
+                if (groundY === -999) continue;
+                
+                // Check if space above is empty
                 if (worldData.has(`${x},${groundY+1},${z}`)) continue;
-
-                const dist = Math.sqrt(x*x + z*z);
+                
+                const surfaceBlock = worldData.get(`${x},${groundY},${z}`);
+                if (!surfaceBlock) continue;
+                
                 const rand = Math.random();
 
-                const isMountain = z < -20 && dist < 70;
-                const isVillageArea = dist < 55 && !isMountain;
-                const isLakeShore = x > 15 && x < 65 && z > -35 && z < 35 && groundY <= WATER_LEVEL + 2;
+                // --- VEGETATION ---
+                if (surfaceBlock === BlockType.GRASS) {
+                    // Increase density of grass and flowers significantly
+                    if (rand < 0.5) { 
+                        if (rand < 0.35) storeBlock(BlockType.TALL_GRASS, x, groundY+1, z);
+                        else if (rand < 0.425) storeBlock(BlockType.FLOWER_RED, x, groundY+1, z);
+                        else storeBlock(BlockType.FLOWER_YELLOW, x, groundY+1, z);
+                    }
+                } else if (surfaceBlock === BlockType.SAND && groundY <= WATER_LEVEL + 2) {
+                     // Deadbush / Reeds near water
+                     if (rand < 0.08) storeBlock(BlockType.DEAD_BUSH, x, groundY+1, z);
+                }
 
-                if (isVillageArea) {
-                    if (rand < 0.015) {
-                        if (rand < 0.005) this.generateBamboo(x, groundY, z, storeBlock);
-                        else this.generateLargePeachTree(x, groundY, z, storeBlock);
-                    } else if (rand < 0.03) {
-                        storeBlock(BlockType.FLOWER_RED, x, groundY+1, z);
-                    } else if (rand < 0.005) {
-                         const type = Math.random() > 0.5 ? 'villager' : (Math.random() > 0.5 ? 'cow' : 'pig');
-                         this.mobs.push(new Mob(type, x, groundY+1, z));
-                         this.scene.add(this.mobs[this.mobs.length-1].mesh);
-                    }
-                } else if (isMountain) {
-                    if (groundY > 35) {
-                        // Snow peak
+                // --- TREES ---
+                // Increased tree density
+                if (rand < 0.04 && (surfaceBlock === BlockType.GRASS || surfaceBlock === BlockType.SNOW || surfaceBlock === BlockType.DIRT)) {
+                    if (surfaceBlock === BlockType.SNOW) {
+                         // Pine? Reuse Oak for now
+                         if (Math.random() < 0.5) this.generateTree(x, groundY, z, storeBlock, 'OAK');
                     } else {
-                        if (rand < 0.02) this.generateTree(x, groundY, z, storeBlock, 'OAK');
+                         // Forest mixing
+                         if (Math.random() < 0.7) this.generateTree(x, groundY, z, storeBlock, 'OAK');
+                         else this.generateTree(x, groundY, z, storeBlock, 'BIRCH');
                     }
-                } else if (isLakeShore) {
-                    if (rand < 0.05) storeBlock(BlockType.TALL_GRASS, x, groundY+1, z);
-                    if (rand < 0.01) this.generateTree(x, groundY, z, storeBlock, 'BIRCH');
-                } else {
-                    if (rand < 0.01) this.generateTree(x, groundY, z, storeBlock, 'OAK');
-                    else if (rand < 0.05) storeBlock(BlockType.TALL_GRASS, x, groundY+1, z);
+                }
+
+                // Village Special Trees (Bamboo/Peach)
+                const dist = Math.sqrt(x*x + z*z);
+                if (dist < 55 && rand < 0.02 && surfaceBlock === BlockType.GRASS) {
+                     if (Math.random() < 0.3) this.generateBamboo(x, groundY, z, storeBlock);
+                     else if (Math.random() < 0.1) this.generateLargePeachTree(x, groundY, z, storeBlock);
+                }
+                
+                // --- MOBS ---
+                // Significantly increased spawn rate (approx 2.5x more)
+                if (rand < 0.02) { 
+                    if ([BlockType.GRASS, BlockType.SAND, BlockType.SNOW, BlockType.STONE].includes(surfaceBlock as any)) {
+                        const r = Math.random();
+                        let type: 'cow'|'sheep'|'pig'|'villager' = 'sheep';
+                        
+                        if (surfaceBlock === BlockType.GRASS) {
+                            if (r < 0.4) type = 'cow';
+                            else if (r < 0.7) type = 'pig';
+                            else type = 'sheep';
+                        } else if (surfaceBlock === BlockType.SAND) {
+                             type = 'villager'; 
+                        } else if (surfaceBlock === BlockType.SNOW || surfaceBlock === BlockType.STONE) {
+                             type = 'sheep'; // Mountain goats
+                        }
+                        
+                        // Ensure no collision with structure walls roughly
+                        if (!worldData.has(`${x},${groundY+2},${z}`)) {
+                            this.mobs.push(new Mob(type, x, groundY+1, z));
+                            this.scene.add(this.mobs[this.mobs.length-1].mesh);
+                        }
+                    }
                 }
             }
         }
