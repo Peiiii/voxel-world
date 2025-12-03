@@ -318,43 +318,55 @@ export class WorldManager {
     }
 
     private generateSkyLadder(worldData: Map<number, string>, cx: number, cz: number) {
-        // Straight, wide, infinite ladder going South (+Z)
-        const maxY = 4000; 
-        const startY = 12; // Start near ground
+        // Spiral "Step-by-step" Ladder
+        const startY = 15;
+        const totalSteps = 250;
+        const radius = 10;
         
-        // Width of the stairs
-        const width = 3; 
-        const totalClearWidth = width + 3;
-
-        for (let i = 0; i < (maxY - startY); i++) {
+        for (let i = 0; i < totalSteps; i++) {
             const y = startY + i;
-            const z = cz + i; // 1:1 slope forward
+            // Adjust angle to create a spiral
+            const angle = i * 0.25; 
             
-            // CLEAR AREA: Aggressively remove blocks above and around the step
-            // This creates a clean tunnel through any mountains or clouds
-            for (let airY = 0; airY < 10; airY++) { // 10 blocks high clearance
-                for (let w = -totalClearWidth; w <= totalClearWidth; w++) {
-                    // Do not remove the block we are about to place (airY=0, within width)
-                    if (airY === 0 && Math.abs(w) <= width) continue;
-                    
-                    const key = getKey(cx + w, y + airY, z);
-                    if (worldData.has(key)) worldData.delete(key);
-                }
-            }
+            const px = cx + Math.cos(angle) * radius;
+            const pz = cz + Math.sin(angle) * radius;
+            
+            const bx = Math.round(px);
+            const bz = Math.round(pz);
+            
+            // Build distinct steps
+            // A 2x2 platform for comfortable climbing
+            const offsets = [
+                {x:0, z:0}, {x:1, z:0}, {x:0, z:1}, {x:1, z:1}
+            ];
 
-            // Build Step
-            for (let w = -width; w <= width; w++) {
-                const x = cx + w;
-                let type = BlockType.SNOW;
-                // Gold trim on the sides and every 50th step
-                if (Math.abs(w) === width || i % 50 === 0) {
-                    type = BlockType.GOLD; 
-                }
-                this.storeBlockMap(worldData, type, x, y, z);
+            for (const off of offsets) {
+                const stepX = bx + off.x;
+                const stepZ = bz + off.z;
                 
-                // Fill underneath slightly to look solid
-                this.storeBlockMap(worldData, BlockType.SNOW, x, y - 1, z);
-                this.storeBlockMap(worldData, BlockType.SNOW, x, y - 2, z);
+                // Clear head space
+                for(let h=1; h<=4; h++) {
+                     const k = getKey(stepX, y+h, stepZ);
+                     if (worldData.has(k)) worldData.delete(k);
+                }
+                
+                let type = BlockType.SNOW;
+                if (i % 20 === 0) type = BlockType.GOLD;
+                if (i % 20 !== 0 && (off.x === 0 && off.z === 0)) type = BlockType.NEON_CYAN;
+                
+                this.storeBlockMap(worldData, type, stepX, y, stepZ);
+            }
+        }
+        
+        // Summit Platform
+        const topY = startY + totalSteps;
+        const topAngle = (totalSteps - 1) * 0.25;
+        const topX = Math.round(cx + Math.cos(topAngle) * radius);
+        const topZ = Math.round(cz + Math.sin(topAngle) * radius);
+        
+        for(let x=-3; x<=3; x++) {
+            for(let z=-3; z<=3; z++) {
+                 this.storeBlockMap(worldData, BlockType.OBSIDIAN, topX+x, topY, topZ+z);
             }
         }
     }
